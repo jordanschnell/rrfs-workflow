@@ -238,7 +238,7 @@ class RaveToMpasRegridProcessor:
         _LOGGER.info("create output file")
         ncells_size = self.context.num_cells #130333  # tdk: pull from origin
         if self.context.rank == 0:
-            with open_nc(self.context.new_dst_path, mode="w", parallel=False) as dst_nc:
+            with open_nc(self.context.new_dst_path, mode="w", parallel=False, clobber=True) as dst_nc:
                 dst_nc.createDimension("nCells", ncells_size)
                 dst_nc.createDimension("nkbio", 1)
                 dst_nc.createDimension("Time")

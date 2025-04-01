@@ -252,7 +252,6 @@ class RaveToMpasRegridProcessor:
                 dst_nc.setncattr("src_path", str(self.context.src_path))
                 dst_nc.setncattr("dst_path", str(self.context.dst_path))
                 with open_nc(self.context.dst_path, mode="r", parallel=False) as src_nc:
-                    #area = np.asarray(src_nc.variables['areaCell'])
                     for varname in ("latCell", "lonCell","areaCell"):
                         copy_nc_variable(src_nc, dst_nc, varname, copy_data=True)
 
@@ -283,13 +282,21 @@ class RaveToMpasRegridProcessor:
                 )
                 for k, v in rave_field.attrs.items():
                     setattr(var, k, v)
-
-                set_variable_data(
-                    var,
-                    dims,
-                    rave_field.reshape_field_data(dst_field.data*area_subset),
-                    collective=True,
-                )
+                if rave_field.name in ("PM25","NH3","SO2"):
+                    set_variable_data(
+                        var,
+                        dims,
+                        rave_field.reshape_field_data(dst_field.data),
+                        collective=True,
+                    )
+                else: 
+                  # Multiply FRE/FRP by output area so it is back to W or J*s
+                    set_variable_data(
+                        var,
+                        dims,
+                        rave_field.reshape_field_data(dst_field.data*area_subset),
+                        collective=True,
+                    )
     
             src_fwrap.value.destroy()
             del src_fwrap
@@ -370,9 +377,10 @@ class RaveToMpasRegridProcessor:
 
         src_data = src_fwrap.value.data
         if field_name in ("PM25", "NH3", "SO2"):
-            src_data[:] = np.where(src_data < 0.0, 0.0, src_data/area_data[:,:,np.newaxis]/3600.)
+            src_data[:] = np.where(src_data < 0.0, 0.0, src_data/(1.e6*area_data[:,:,np.newaxis])/3600.)
         elif field_name in ("FRE","FRP_MEAN"):
-            src_data[:] = np.where(src_data < 0.0, 0.0, src_data/area_data[:,:,np.newaxis])
+          # For FRE, FRP, don't multiply area by 1.e6, cancelled out by MW to W conversion
+            src_data[:] = np.where(src_data < 0.0, 0.0, src_data/(area_data[:,:,np.newaxis])
         else:
             src_data[:] = np.where(src_data < 0.0, 0.0, src_data)
         return src_fwrap

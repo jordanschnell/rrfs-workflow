@@ -240,7 +240,7 @@ class RaveToMpasRegridProcessor:
         _LOGGER.info("create output file")
         ncells_size = self.context.num_cells #130333  # tdk: pull from origin
         if self.context.rank == 0:
-            with open_nc(self.context.new_dst_path, mode="w", parallel=False) as dst_nc:
+            with open_nc(self.context.new_dst_path, mode="w", parallel=False, clobber=True) as dst_nc:
                 dst_nc.createDimension("nCells", ncells_size)
                 dst_nc.createDimension("nkemit", 20)
                 dst_nc.createDimension("Time",12)
@@ -266,6 +266,7 @@ class RaveToMpasRegridProcessor:
             dims = rave_field.create_dimension_collection(reconciled_bounds)
             _LOGGER.info(f"{dims=}")
             _LOGGER.info(f"writing field to netcdf")
+            conv_aer = 1.e6 / 3600. # conversion factor for metric tons/km2/hr --> ug/m2/s
             with open_nc(self.context.new_dst_path, mode="a") as ds:
                 var = ds.createVariable(
                     rave_field.name,
@@ -278,7 +279,7 @@ class RaveToMpasRegridProcessor:
                 set_variable_data(
                     var,
                     dims,
-                    dst_field.data,
+                    dst_field.data*conv_aer,
                     collective=True,
                 )
 

@@ -20,6 +20,7 @@
 #
 declare -rx PS4='+ $(basename ${BASH_SOURCE[0]:-${FUNCNAME[0]:-"Unknown"}})[${LINENO}]${id}: '
 set -x
+nt=$SLURM_NTASKS
 cpreq=${cpreq:-cpreq}
 #
 LS=/bin/ls
@@ -268,14 +269,14 @@ fi
          fi
          DSTGRID=${DATA}/${MESH_NAME}.init.nc
          SRCGRID=${EMISFILE_BASE_RAW}
-         mpirun -n 24 python -u ${SCRIPT}   \
+         mpirun -n 40 python -u ${SCRIPT}   \
                     ${DATA} \
                     ${MESH_NAME} \
                     ${REGRID_WEIGHTS} \
                     ${EMISFILE_BASE_RAW1} \
                     ${YYYY}${MM}${DD}${HH}00000 \
                     ${EMISFILE1}
-         mpirun -n 24 python -u ${SCRIPT}   \
+         mpirun -n 40 python -u ${SCRIPT}   \
                     ${DATA} \
                     ${MESH_NAME} \
                     ${REGRID_WEIGHTS} \
@@ -296,6 +297,7 @@ fi
                 HH_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%H)
                 MOY_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%B)
                 DOW_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%A)
+                LINKEDEMISFILE=${UMBRELLA_PREP_CHEM_DATA}/anthro.init.${YYYY_EMIS}-${MM_EMIS}-${DD_EMIS}_${HH_EMIS}.00.00.nc
                 if [ "${HH_EMIS}" -gt 11 ]; then
                    offset=12
                    EMISFILE=${EMISFILE1}
@@ -306,21 +308,25 @@ fi
                 t_ix=$((10#$HH_EMIS-${offset}))
                 #
                 EMISFILE_FINAL=${EMISOUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_${HH_EMIS}Z.nc
-                ncks -d Time,${t_ix},${t_ix} ${EMISFILE} ${EMISFILE_FINAL}
-                ${ECHO} "Created file #${ihour}/${FCST_LENGTH} at ${EMISFILE_FINAL}"
-                cp ${MPAS_BASEFILE} ./mpas_basefile.nc
-                mv ${EMISFILE_FINAL} ${EMISFILE_FINAL}_temp.nc
-                ncks -A ${EMISFILE_FINAL}_temp.nc mpas_basefile.nc
-                rm -f ${EMISFILE_FINAL}_temp.nc
-                mv mpas_basefile.nc ${EMISFILE_FINAL}
-                ncks -A -v xtime ${DATA}/${MESH_NAME}.init.nc ${EMISFILE_FINAL}
-                ncrename -v PM25-PRI,e_ant_in_unspc_fine -v PM10-PRI,e_ant_in_unspc_coarse ${EMISFILE_FINAL}
-                ncap2 -O -s 'e_ant_in_smoke_fine=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-                ncap2 -O -s 'e_ant_in_smoke_coarse=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-                ncap2 -O -s 'e_ant_in_dust_fine=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-                ncap2 -O -s 'e_ant_in_dust_coarse=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-                LINKEDEMISFILE=${UMBRELLA_PREP_CHEM_DATA}/anthro.init.${YYYY_EMIS}-${MM_EMIS}-${DD_EMIS}_${HH_EMIS}.00.00
-                ${LN} -sf ${EMISFILE_FINAL} ${LINKEDEMISFILE}
+                if [[ -r ${EMISFILE_FINAL} ]]; then
+                   ${LN} -sf ${EMISFILE_FINAL} ${LINKEDEMISFILE}
+                else
+                   ncks -d Time,${t_ix},${t_ix} ${EMISFILE} ${EMISFILE_FINAL}
+                   ${ECHO} "Created file #${ihour}/${FCST_LENGTH} at ${EMISFILE_FINAL}"
+                   cp ${MPAS_BASEFILE} ./mpas_basefile.nc
+                   mv ${EMISFILE_FINAL} ${EMISFILE_FINAL}_temp.nc
+                   ncks -A ${EMISFILE_FINAL}_temp.nc mpas_basefile.nc
+                   rm -f ${EMISFILE_FINAL}_temp.nc
+                   mv mpas_basefile.nc ${EMISFILE_FINAL}
+                   ncks -A -v xtime ${DATA}/${MESH_NAME}.init.nc ${EMISFILE_FINAL}
+                   ncrename -v PM25-PRI,e_ant_in_unspc_fine -v PM10-PRI,e_ant_in_unspc_coarse ${EMISFILE_FINAL}
+#                   ncap2 -O -s 'e_ant_in_unspc_fine=e_ant_in_unspc_fine/3600.' -s 'e_ant_in_unspc_coarse=e_ant_in_unspc_coarse/3600.' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
+                   ncap2 -O -s 'e_ant_in_smoke_fine=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
+                   ncap2 -O -s 'e_ant_in_smoke_coarse=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
+                   ncap2 -O -s 'e_ant_in_dust_fine=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
+                   ncap2 -O -s 'e_ant_in_dust_coarse=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
+                   ${LN} -sf ${EMISFILE_FINAL} ${LINKEDEMISFILE}
+                fi
             done
          fi
    fi
@@ -329,211 +335,6 @@ fi
 
 
 
-##==================================================================================================
-##                                 ... Anthropogenic ...                                             
-##==================================================================================================
-##
-## --- Are we adding anthropogenic sectors?
-#if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
-##
-#export REGRID_WRAPPER_LOG_DIR=${DATA}
-#regrid_wrapper_dir=/lfs5/BMC/rtwbl/rap-chem/mpas_rt/working/ben_interp/regrid-wrapper
-#PYTHONDIR=${regrid_wrapper_dir}/src
-##
-#CONDAENV=/lfs5/BMC/rtwbl/rap-chem/miniconda/envs/regrid-wrapper
-##
-#export PATH=${CONDAENV}/bin:${PATH}
-#export ESMFMKFILE=${CONDAENV}/lib/esmf.mk
-#export PYTHONPATH=${PYTHONDIR}:${PYTHONPATH}
-#if [[ "${ANTHRO_EMISINV}" == "NEMO" ]]; then
-#SCRIPT=${HOMErrfs}/scripts/regrid_anthro_to_mpas.py 
-#else
-#SCRIPT=${HOMErrfs}/scripts/regrid_grapes_to_mpas.py
-#fi 
-## --- Set the file expression and lat/lon dimension names
-##
-#   # --- Do we have hourly emissions regridded to our domain?
-#   # --- If we already have the hourly emissions, link the first 24 and duplicate for anything beyond 24 hours
-#   #
-#   REMAKE_EMIS=0
-#   dates_needed=()
-#   for ihour in $(seq 0 $((${FCST_LENGTH} - 1)))
-#   do
-#      YYYY_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%Y)
-#      MM_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%m)
-#      DD_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%d)
-#      HH_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%H)
-#      MOY_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%B) 
-#      DOW_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%A)
-#      if [[ ${DOW_EMIS} -le 5 ]]; then
-#         DOW_EMIS_STRING=weekdy
-#      elif [[ ${DOW_EMIS} -eq 6 ]]; then
-#         DOW_EMIS_STRING=satdy
-#      else
-#         DOW_EMIS_STRING=sundy
-#      fi
-#      #
-#      EMISINPUTDIR=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/${MOY_EMIS}/${DOW_EMIS_STRING}/
-#      EMISOUTPUTDIR=${DATADIR_CHEM}/emissions/anthro/processed/${ANTHRO_EMISINV}/${MOY_EMIS}/${DOW_EMIS_STRING}/
-#      #
-#      EMISFILE=${EMISOUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_${HH_EMIS}Z.nc
-#      #
-#      ${MKDIR} -p ${EMISOUTPUTDIR}
-#      #
-#      LINKEDEMISFILE=${UMBRELLA_PREP_CHEM_DATA}/anthro.init.${YYYY_EMIS}-${MM_EMIS}-${DD_EMIS}_${HH_EMIS}.00.00.nc
-#      if [ ! -r ${EMISFILE} ]; then
-#         ${ECHO} "Can't link anthropogenic input file: ${EMISFILE} and may be missing more. Will attempt to create..."
-#         REMAKE_EMIS=1
-#         if [[ ${has_init} -eq 0 ]]; then
-#            ${ECHO} "Nevermind, no init file, exiting, run ic task"
-#            exit 1
-#         fi
-#         dates_needed+=("${YYYY_EMIS}${MM_EMIS}${DD_EMIS}${HH_EMIS}")
-#      else
-#        ${LN} -sf ${EMISFILE} ${UMBRELLA_PREP_CHEM_DATA}/anthro.init.${YYYY_EMIS}-${MM_EMIS}-${DD_EMIS}_${HH_EMIS}.00.00
-#      fi
-#   done
-#   if  [[ ${REMAKE_EMIS} -eq 0 ]] ; then
-#          ${ECHO} "Successfully linked anthropogenic emissions files"
-#          exit 0
-#   else
-#   #
-#   # -- Start the regridding process
-#   #
-#   # -- Check to see if we already have a weight file, otherwise remake
-#      REMAKE_WEIGHTS="False"
-#      REGRID_WEIGHTS=${DATADIR_CHEM}/grids/interpolation_weights/weights_${ANTHRO_EMISINV}-to-${MESH_NAME}_${INTERP_METHOD}.nc
-#      if [[ -r ${REGRID_WEIGHTS} ]] ; then
-#         ${ECHO} "Found weight file to interpolate ${ANTHRO_EMISINV} to ${MESH_NAME} at ${REGRID_WEIGHTS}, proceeding with the regrid"
-#      else
-#         ${ECHO} "No weight file exists to interpolate ${ANTHRO_EMISINV} to ${MESH_NAME}, will attempt to make one"
-#         REMAKE_WEIGHTS="True"
-#      fi
-#      DSTGRID=${DATA}/${MESH_NAME}.init.nc
-#
-#   # -- We expect a file with 24 hourly values (00 to 23Z)
-#   # -- We check the full length of the forecast (i.e., May 31 emissions aren't used for Jun1 if the forecast passes through midnight)
-#      for ihour in $(seq 0 $((${FCST_LENGTH} - 1)))
-#      do
-#         YYYY_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%Y)
-#         MM_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%m)
-#         DD_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%d)
-#         HH_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%H)
-#         MOY_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%B)
-#         DOW_EMIS=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%A)
-#         if [[ ${DOW_EMIS} -le 5 ]]; then
-#            DOW_EMIS_STRING=weekdy
-#         elif [[ ${DOW_EMIS} -eq 6 ]]; then 
-#            DOW_EMIS_STRING=satdy
-#         else
-#            DOW_EMIS_STRING=sundy
-#         fi
-#         if [[ $ihour -lt 10 ]]; then
-#            HH_STR="0"${ihour}
-#         else
-#            HH_STR=${ihour}
-#         fi
-#         #
-#         if [[ "${ANTHRO_EMISINV}" == "NEMO" ]]; then
-#            EMISFILE_BASE_RAW=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/${MOY_EMIS}/${DOW_EMIS_STRING}/${ANTHRO_EMISINV}_${MOY_EMIS}_${DOW_EMIS_STRING}_${HH_STR}.nc
-#         else
-#            if [[ $ihour -le 11 ]]; then
-#            EMISFILE_BASE_RAW=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM_EMIS}/${DOW_EMIS_STRING}/GRA2PESv1.0_total_2021${MM_EMIS}_${DOW_EMIS_STRING}_00to11Z.nc
-#            Zstring="00to11"
-#            else
-#            EMISFILE_BASE_RAW=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM_EMIS}/${DOW_EMIS_STRING}/GRA2PESv1.0_total_2021${MM_EMIS}_${DOW_EMIS_STRING}_12to23Z.nc
-#            Zstring="12to23"
-#            fi
-#         fi
-# 
-#         EMISOUTPUTDIR=${DATADIR_CHEM}/emissions/anthro/processed/${ANTHRO_EMISINV}/${MOY_EMIS}/${DOW_EMIS_STRING}/
-#         ${MKDIR} -p ${EMISOUTPUTDIR}
-#         EMISFILE=${EMISOUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_${Zstring}Z.nc
-#         #
-#         if [[ -r ${EMISFILE_BASE_RAW} ]];  then
-#            ${ECHO} "Found base emission file: ${EMISFILE_BASE_RAW}, will regrid"
-#         else
-#            ${ECHO} "No interpolated file and Cannot regrid, no base emission file: ${EMISFILE_BASE_RAW}"
-#            exit 1
-#         fi
-#         #
-#         if [[ -r ${EMISFILE} ]]; then
-#            ${ECHO} "${EMISFILE} created in loop, skipping"
-#            continue
-#         else
-#         #
-#            SRCGRID=${EMISFILE_BASE_RAW}
-#            DSTGRID=${DATA}/${MESH_NAME}.init.nc
-#            mpirun -n 24 python -u ${SCRIPT}   \
-#                       ${DATA} \
-#                       ${MESH_NAME} \
-#                       ${REGRID_WEIGHTS} \
-#                       ${EMISFILE_BASE_RAW} \
-#                       ${YYYY_EMIS}${MM_EMIS}${DD_EMIS}${HH_EMIS}00000 \
-#                       ${EMISFILE}
-#            #
-#            if [[ ! -r ${EMISFILE} ]]; then
-#               ${ECHO} "ERROR: Did not interpolate ${SRCGRID} to ${DSTGRID}"
-#               exit 1
-#            else
-#               ncpdq -O -a Time,nCells,nkemit ${EMISFILE} ${EMISFILE}
-#               if [[ ${ihour} -le 11 ]] && [[ "${ANTHRO_EMISINV}" == "GRAPES" ]]; then
-#                  for ihour2 in $(seq 0 11)
-#                  do
-#                      if [ ${ihour2} -lt 10 ]; then
-#                         ih2s="0"${ihour2}
-#                      else
-#                         ih2s=${ihour2}
-#                      fi
-#                      EMISFILE_FINAL=${EMISOUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_${ih2s}Z.nc
-#                      ncks -d Time,${ihour},${ihour} ${EMISFILE} ${EMISFILE_FINAL}
-#                      ${ECHO} "Created file #${ihour}/${FCST_LENGTH} at ${EMISFILE}"
-#                      cp ${MPAS_BASEFILE} ./mpas_basefile.nc
-#                      mv ${EMISFILE_FINAL} ${EMISFILE_FINAL}_temp.nc
-#                      ncks -A ${EMISFILE_FINAL}_temp.nc mpas_basefile.nc
-#                      rm -f ${EMISFILE_FINAL}_temp.nc
-#                      mv mpas_basefile.nc ${EMISFILE_FINAL}
-#                      ncks -A -v xtime ${DATA}/${MESH_NAME}.init.nc ${EMISFILE_FINAL}
-#                      if [[ "${EMISINV}" == "GRAPES" ]]; then
-#                      ncap2 -O -s 'e_ant_in_smoke_fine=0.0*PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_smoke_coarse=0.0*PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_dust_fine=0.0*PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_dust_coarse=0.0*PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_unspc_fine=PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_unspc_coarse=PM10-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      fi
-#                      ${LN} -sf ${EMISFILE_FINAL} ${LINKEDEMISFILE}
-#                  done
-#               elif  [[ ${ihour} -gt 11 ]] && [[ "${ANTHRO_EMISINV}" == "GRAPES" ]]; then
-#                  for ihour2 in $(seq 0 11)
-#                  do
-#                      ihour3=$((${ihour2}+12))
-#                      EMISFILE_FINAL=${EMISOUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_${ihour3}Z.nc
-#                      ncks -d Time,${ihour2},${ihour2} ${EMISFILE} ${EMISFILE_FINAL}
-#                      ${ECHO} "Created file #${ihour}/${FCST_LENGTH} at ${EMISFILE}"
-#                      cp ${MPAS_BASEFILE} ./mpas_basefile.nc
-#                      mv ${EMISFILE_FINAL} ${EMISFILE_FINAL}_temp.nc
-#                      ncks -A ${EMISFILE_FINAL}_temp.nc mpas_basefile.nc
-#                      rm -f ${EMISFILE_FINAL}_temp.nc
-#                      mv mpas_basefile.nc ${EMISFILE_FINAL}
-#                      ncks -A -v xtime ${DATA}/${MESH_NAME}.init.nc ${EMISFILE_FINAL}
-#                      if [[ "${EMISINV}" == "GRAPES" ]]; then
-#                      ncap2 -O -s 'e_ant_in_smoke_fine=0.0*PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_smoke_coarse=0.0*PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_dust_fine=0.0*PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_dust_coarse=0.0*PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_unspc_fine=PM25-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      ncap2 -O -s 'e_ant_in_unspc_coarse=PM10-PRI' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
-#                      fi
-#                      ${LN} -sf ${EMISFILE_FINAL} ${LINKEDEMISFILE}
-#                  done
-#               fi      
-#                
-#            fi
-#          fi
-#      done
-#   fi
-#fi
 
 #==================================================================================================
 #                                 ... Biogenic/Pollen ...                                             
@@ -589,7 +390,7 @@ ${MKDIR} -p ${EMISOUTPUTDIR}
    fi
    SRCGRID=${EMISFILE_BASE}
    DSTGRID=${DATA}/${MESH_NAME}.init.nc
-   mpirun -n 24 python -u ${SCRIPT}   \
+   mpirun -n 40 python -u ${SCRIPT}   \
                    ${DATA} \
                    ${MESH_NAME} \
                    ${REGRID_WEIGHTS} \
