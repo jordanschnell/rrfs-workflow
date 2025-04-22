@@ -2,7 +2,6 @@ import re
 import shutil
 import subprocess
 import sys
-import glob
 from abc import abstractmethod, ABC
 from datetime import datetime, timezone
 from functools import cached_property
@@ -57,7 +56,7 @@ class AbstractRaveField(ABC, BaseModel):
     @cached_property
     def nkfire_dimension(self) -> Dimension:
         return Dimension(
-            name=("nkfire",),
+            name=("nkemit",),
             size=1,
             lower=0,
             upper=1,
@@ -129,14 +128,13 @@ class RaveToMpasRegridContext(BaseModel):
     @computed_field
     @cached_property
     def rave_fields(self) -> tuple[AbstractRaveField, ...]:
-        field_names = ("FRE", "FRP_MEAN", "PM25", "NH3", "SO2")
+        field_names = ("RWC_denominator")
+        field_names = field_names if isinstance(field_names,list) else [field_names]
         rave_fields = []
         with open_nc(self.src_path, mode="r") as ds:
             for field_name in field_names:
-                if field_name in ("PM25", "NH3", "SO2"):
-                   var = ds.variables[field_name]
-                else:
-                   var = ds.variables[field_name]
+                print("JLS, field name = " + str(field_name))
+                var = ds.variables[field_name]
                 init_data = {
                     "name": field_name,
                     "attrs": self._get_nc_attrs_(var),
@@ -144,10 +142,8 @@ class RaveToMpasRegridContext(BaseModel):
                     "dtype": var.dtype,
                     "num_cells": self.num_cells,
                 }
-                if field_name in ("FRE", "FRP_MEAN"):
+                if field_name in ("RWC_denominator"):
                     app = RaveField2d.model_validate(init_data)
-                elif field_name in ("PM25", "NH3", "SO2"):
-                    app = RaveField3d.model_validate(init_data)
                 else:
                     raise NotImplementedError(field_name)
                 rave_fields.append(app)
@@ -195,14 +191,14 @@ class RaveToMpasRegridProcessor:
         self._src_gwrap = NcToGrid(
             path=self.context.src_path,
             spec=GridSpec(
-                x_center="grid_lont",
-                y_center="grid_latt",
-                x_dim=("grid_xt",),
-                y_dim=("grid_yt",),
-                x_corner="grid_lon",
-                y_corner="grid_lat",
-                x_corner_dim=("grid_x",),
-                y_corner_dim=("grid_y",),
+                x_center="lon",
+                y_center="lat",
+                x_dim=("x",),
+                y_dim=("y",),
+                x_corner=None,
+                y_corner=None,
+                x_corner_dim=None,
+                y_corner_dim=None,
             ),
         ).create_grid_wrapper()
 
@@ -232,8 +228,8 @@ class RaveToMpasRegridProcessor:
             self._regridder = esmpy.Regrid(
                 srcfield=src_fwrap.value,
                 dstfield=self._dst_field,
-                regrid_method=esmpy.RegridMethod.CONSERVE,
-                unmapped_action=esmpy.UnmappedAction.ERROR,
+                regrid_method=esmpy.RegridMethod.BILINEAR,
+                unmapped_action=esmpy.UnmappedAction.IGNORE,
                 ignore_degenerate=False,
                 filename=str(self.context.weight_path),
             )
@@ -244,27 +240,26 @@ class RaveToMpasRegridProcessor:
         _LOGGER.info("create output file")
         ncells_size = self.context.num_cells #130333  # tdk: pull from origin
         if self.context.rank == 0:
-            with open_nc(self.context.new_dst_path, mode="w", clobber=True, parallel=False) as dst_nc:
+            with open_nc(self.context.new_dst_path, mode="w", parallel=False) as dst_nc:
                 dst_nc.createDimension("nCells", ncells_size)
-                dst_nc.createDimension("nkfire", 1)
+                dst_nc.createDimension("nkemit", 1)
                 dst_nc.createDimension("Time")
                 dst_nc.setncattr("created_at", str(datetime.now(timezone.utc)))
                 dst_nc.setncattr("src_path", str(self.context.src_path))
                 dst_nc.setncattr("dst_path", str(self.context.dst_path))
                 with open_nc(self.context.dst_path, mode="r", parallel=False) as src_nc:
-                    for varname in ("latCell", "lonCell","areaCell"):
+                    for varname in ("latCell", "lonCell"):
                         copy_nc_variable(src_nc, dst_nc, varname, copy_data=True)
 
         regridder = self.get_regridder()
         for rave_field in self.context.rave_fields:
             _LOGGER.info(f"regridding {rave_field.name=}")
             src_fwrap = self.create_src_field_wrapper(field_name=rave_field.name)
-
             dst_field = self.get_dst_field()
             # tdk: any more qa stuff? minimum threshold?
             dst_field.data.fill(0.0)
             regridder(src_fwrap.value, dst_field)
-# IF FRP/FRE, need to convert back to W from W/m2
+
             # tdk: support NcToMesh
             local_bounds = (dst_field.lower_bounds[0], dst_field.upper_bounds[0])
             reconciled_bounds = reconcile_bounds(local_bounds)
@@ -272,8 +267,6 @@ class RaveToMpasRegridProcessor:
             _LOGGER.info(f"{dims=}")
             _LOGGER.info(f"writing field to netcdf")
             with open_nc(self.context.new_dst_path, mode="a") as ds:
-                area = np.asarray(ds.variables['areaCell'])
-                area_subset = area[reconciled_bounds[0]:reconciled_bounds[1]]
                 var = ds.createVariable(
                     rave_field.name,
                     rave_field.dtype,
@@ -282,22 +275,13 @@ class RaveToMpasRegridProcessor:
                 )
                 for k, v in rave_field.attrs.items():
                     setattr(var, k, v)
-                if rave_field.name in ("PM25","NH3","SO2"):
-                    set_variable_data(
-                        var,
-                        dims,
-                        rave_field.reshape_field_data(dst_field.data),
-                        collective=True,
-                    )
-                else: 
-                  # Multiply FRE/FRP by output area so it is back to W or J*s
-                    set_variable_data(
-                        var,
-                        dims,
-                        rave_field.reshape_field_data(dst_field.data*area_subset),
-                        collective=True,
-                    )
-    
+                set_variable_data(
+                    var,
+                    dims,
+                    rave_field.reshape_field_data(dst_field.data),
+                    collective=True,
+                )
+
             src_fwrap.value.destroy()
             del src_fwrap
 
@@ -362,27 +346,10 @@ class RaveToMpasRegridProcessor:
             path=self.context.src_path,
             name=field_name,
             gwrap=self.get_src_gwrap(),
-            dim_time=("time",),
-            dim_level=None,
+            dim_time=("Time",),
         ).create_field_wrapper()
-# Get the area from the RAVE file, need to convert from /grid to /m2
-        if field_name in ("PM25", "NH3", "SO2", "FRE","FRP_MEAN"):
-            area_fwrap = NcToField(
-                path=self.context.src_path,
-                name='area',
-                gwrap=self.get_src_gwrap(),
-                dim_time=None,
-            ).create_field_wrapper()
-            area_data = area_fwrap.value.data
-
         src_data = src_fwrap.value.data
-        if field_name in ("PM25", "NH3", "SO2"):
-            src_data[:] = np.where(src_data < 0.0, 0.0, src_data/(1.e6*area_data[:,:,np.newaxis])/3600.)
-        elif field_name in ("FRE","FRP_MEAN"):
-          # For FRE, FRP, don't multiply area by 1.e6, cancelled out by MW to W conversion
-            src_data[:] = np.where(src_data < 0.0, 0.0, src_data/(area_data[:,:,np.newaxis]))
-        else:
-            src_data[:] = np.where(src_data < 0.0, 0.0, src_data)
+        src_data[:] = np.where(src_data < 0.0, 0.0, src_data)
         return src_fwrap
 
     def get_src_gwrap(self) -> GridWrapper:
@@ -402,50 +369,38 @@ class RaveToMpasRegridProcessor:
 
 
 def main() -> None:
-    data_dir     = sys.argv[1] # Top directory of RAVE input data, ../raw/
-    data_name    = sys.argv[2]
-    tmp_path     = Path(sys.argv[3]) # Top directory of RAVE output data, ../processed/
-    stc_path     = sys.argv[4]
-    mesh_name    = sys.argv[5]
-    cycle        = sys.argv[6]
-    dates_needed = sys.argv[7:-1]   # +%Y%m%d%H 
-
-    rave_src_dir = data_dir
-    dst_path = Path(mesh_name + ".init.nc")       # Name of init file
-    output_dir = tmp_path
-    
-    output_dir.mkdir(exist_ok=True)
-    weight_path = Path(stc_path + "/weights_rave-to-" + mesh_name + "_mpas.nc")
-    scrip_path = tmp_path / "mpas_scrip.nc"
+    workdir      = sys.argv[1]
+    mesh_name    = sys.argv[2]
+    weight_path  = Path(sys.argv[3])
+    rave_path    = Path(sys.argv[4])
+    cycle        = sys.argv[5]
+    new_dst_path = sys.argv[6] 
+    dst_path     = Path(workdir + "/" + mesh_name + ".init.nc")       # Name of init file
+    scrip_path   = Path(workdir + "/mpas_scrip.nc")
 
     with open_nc(dst_path, mode="r", parallel=False) as src_nc:
         foo = src_nc.variables['latCell']
         num_cells = len(foo)
+        desc_stats_out = Path("desc_stats-{cycle}.csv")
 
-    for date_to_process in dates_needed:
-       rave_paths=glob.glob(rave_src_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s"+date_to_process+"*")
-       rave_path=rave_paths[0]
-       new_dst_path = Path(output_dir / f"{mesh_name}-RAVE-{date_to_process}.nc")
-       desc_stats_out = output_dir / f"desc_stats-{cycle}.csv"
-   
-       context = RaveToMpasRegridContext(
-           src_path=rave_path,
-           dst_path=dst_path,
-           new_dst_path=new_dst_path,
-           desc_stats_out=desc_stats_out,
-           tmp_path=tmp_path,
-           weight_path=weight_path,
-           scrip_path=scrip_path,
-           num_cells=num_cells,
-           mesh_name=mesh_name,
-       )
-       processor = RaveToMpasRegridProcessor(context=context)
-       processor.initialize()
-       processor.run()
-       processor.finalize()
-   
-       _LOGGER.info("success")
-   
-   
+        context = RaveToMpasRegridContext(
+            src_path=rave_path,
+            dst_path=dst_path,
+            new_dst_path=new_dst_path,
+            desc_stats_out=desc_stats_out,
+            tmp_path=workdir,
+            weight_path=weight_path,
+            scrip_path=scrip_path,
+            num_cells=num_cells,
+            mesh_name=mesh_name,
+        )
+        processor = RaveToMpasRegridProcessor(context=context)
+        processor.initialize()
+        processor.run()
+        processor.finalize()
+
+    _LOGGER.info("success")
+
+
 if __name__ == "__main__":
     main()
