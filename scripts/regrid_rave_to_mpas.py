@@ -377,7 +377,7 @@ class RaveToMpasRegridProcessor:
 
         src_data = src_fwrap.value.data
         if field_name in ("PM25", "NH3", "SO2"):
-            src_data[:] = np.where(src_data < 0.0, 0.0, src_data/(1.e6*area_data[:,:,np.newaxis])/3600.)
+            src_data[:] = np.where(src_data < 0.0, 0.0, src_data*1.e3/area_data[:,:,np.newaxis]/3600.)
         elif field_name in ("FRE","FRP_MEAN"):
           # For FRE, FRP, don't multiply area by 1.e6, cancelled out by MW to W conversion
             src_data[:] = np.where(src_data < 0.0, 0.0, src_data/(area_data[:,:,np.newaxis]))
