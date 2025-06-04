@@ -77,11 +77,11 @@ if [[ ${nfirefiles} -gt 0 ]]; then
    ln -snf ${UMBRELLA_PREP_CHEM_DATA}/smoke.init* ./
 fi
 module load nco
-yesterday_name=$(date -d "${CDATE:0:8} ${CDATE:8:2} - 24 hours" +%Y%m%d)
+yesterday_name=$(date -d "${CDATE:0:8} ${CDATE:8:2} - 24 hours" +%Y%m%d%H)
 today_name=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%Y-%m-%d) # history.2025-03-17_00.00.00.nc
 yesterday_chem_name=/lfs5/BMC/rtwbl/rap-chem/mpas_rt/cycledir/stmp/${yesterday_name}/rrfs_fcst_00_v2.0.9/det/fcst_00/mpasout.${today_name}_00.00.00.nc
 if [[ -r ${yesterday_chem_name} ]]; then
-ncks -A -v smoke_fine,smoke_coarse,dust_fine,dust_coarse,polp_tree,polp_grass,polp_weed,pols_all,ssalt_fine,ssalt_coarse ${yesterday_chem_name} mpasin.nc
+ncks -A -v unspc_fine,unspc_coarse,smoke_fine,smoke_coarse,dust_fine,dust_coarse,polp_tree,polp_grass,polp_weed,pols_all,ssalt_fine,ssalt_coarse ${yesterday_chem_name} mpasin.nc
 else
 ncap2 -O -s 'smoke_fine=1.e-12*qv' -s 'smoke_coarse=1.e-12*qv' -s 'dust_fine=1.e-12*qv' -s 'dust_coarse=1.e-12*qv' -s 'dust_fine=1.e-12*qv' -s 'dust_coarse=1.e-12*qv' -s 'unspc_fine=1.e-12*qv' -s 'unspc_coarse=1.e-12*qv' -s 'ssalt_fine=1.e-12*qv' -s 'ssalt_coarse=1.e-12*qv' -s 'polp_tree=1.e-12*qv' -s 'polp_grass=1.e-12*qv' -s 'polp_weed=1.e-12*qv' -s 'pols_all=1.e-12*qv' mpasin.nc mpasin.nc
 fi

@@ -47,7 +47,7 @@ YYYY=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%Y)
 MM=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%m)
 DD=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%d)
 HH=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%H)
-DOW=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%A)  # 1-7, Monday-Sunday
+DOW=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%u)  # 1-7, Monday-Sunday
 #
 YYYY_END=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${FCST_LENGTH} hours" +%Y)
 MM_END=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${FCST_LENGTH} hours" +%m)
@@ -214,7 +214,7 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
    #
    ANTHROEMIS_INPUTDIR=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM}/${DOW_STRING}/
    ANTHROEMIS_OUTPUTDIR=${DATADIR_CHEM}/emissions/anthro/processed/${ANTHRO_EMISINV}/${MOY}/${DOW_STRING}/
-   ${MKDIR} -p ${ANTRHOEMIS_OUTPUTDIR}
+   ${MKDIR} -p ${ANTHROEMIS_OUTPUTDIR}
    
    if [[ "${ANTHRO_EMISINV}" == "NEMO" ]]; then # very different processing for NEMO emis
     EMISFILE_RWC_RAW=${ANTHROEMIS_STATICDIR}/RWC/total/NEMO_RWC_POC_PEC_PMOTHR.annual.2017_Time.nc
@@ -252,15 +252,19 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
     LINKEDEMISFILE=${UMBRELLA_PREP_CHEM_DATA}/rwc.init.nc
     ${LN} -sf ${EMISFILE_DENOM_PROCESSED} ${LINKEDEMISFILE}   
  
-   elif [[ "${ANTHRO_EMISINV}" == "GRAPES" ]]; then
+   elif [[ "${ANTHRO_EMISINV}" == "GRA2PES" ]]; then
     #
     EMISFILE_BASE_RAW1=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM}/${DOW_STRING}/GRA2PESv1.0_total_2021${MM}_${DOW_STRING}_00to11Z.nc
     EMISFILE_BASE_RAW2=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM}/${DOW_STRING}/GRA2PESv1.0_total_2021${MM}_${DOW_STRING}_12to23Z.nc
+    INPUT_GRID=${DATADIR_CHEM}/grids/domain_latlons/GRA2PESv1.0_CONUS4km_grid_info.nc
+
     #
     EMISFILE1=${ANTHROEMIS_OUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_00to11Z.nc
     EMISFILE2=${ANTHROEMIS_OUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_12to23Z.nc
     #
     if [[ -r ${EMISFILE_BASE_RAW1} ]] && [[ -r ${EMISFILE_BASE_RAW2} ]]; then
+       ncks -A -v XLAT_C,XLAT_M,XLONG_C,XLONG_M ${INPUT_GRID} ${EMISFILE_BASE_RAW1}
+       ncks -A -v XLAT_C,XLAT_M,XLONG_C,XLONG_M ${INPUT_GRID} ${EMISFILE_BASE_RAW2}
        ${ECHO} "Found base emission files: ${EMISFILE_BASE_RAW1} and ${EMISFILE_BASE_RAW2}, will interpolate"
        # -- Start the regridding process
           mpirun -np ${nt} python -u ${SCRIPT}   \
@@ -278,9 +282,9 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
           else
              # TODO Rearrange the dimension inside of interp script
              ncpdq -O -a Time,nCells,nkemit ${EMISFILE1} ${EMISFILE1}
-             ncks -O --mk-rec-dim Time ${EMISFILE1} ${EMISFILE1}
+             ncks -O --mk_rec_dmn Time ${EMISFILE1} ${EMISFILE1}
              ncpdq -O -a Time,nCells,nkemit ${EMISFILE2} ${EMISFILE2}
-             ncks -O --mk-rec-dim Time ${EMISFILE2} ${EMISFILE2}
+             ncks -O --mk_rec_dmn Time ${EMISFILE2} ${EMISFILE2}
              ncks -O -6  ${EMISFILE1} ${EMISFILE1}
              ncks -O -6  ${EMISFILE2} ${EMISFILE2}
              for ihour in $(seq 0 ${FCST_LENGTH}) 
