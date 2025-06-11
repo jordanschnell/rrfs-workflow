@@ -123,10 +123,16 @@ export PYTHONPATH=${PYTHONDIR}:${PYTHONPATH}
 #==================================================================================================#
 if [[ "${EMIS_SECTOR_TO_PROCESS}" == "smoke" ]]; then
 #
+if [[ ! ${RAVE_DIR} ]]; then
 RAVE_INPUTDIR=/public/data/grids/nesdis/3km_fire_emissions/ # JLS, TODO, should come from a config/namelist
+else
+RAVE_INPUTDIR=${RAVE_DIR}
+fi
 RAVE_OUTPUTDIR=${DATADIR_CHEM}/emissions/fire/processed/rave/
 ECO_INPUTDIR=${DATADIR_CHEM}/aux/ecoregion/
 ECO_OUTPUTDIR=${DATADIR_CHEM}/aux/ecoregion/
+FMC_INPUTDIR=${DATADIR_CHEM}/aux/FMC/${YYYY}/${MM}/
+FMC_OUTPUTDIR=${DATADIR_CHEM}/aux/FMC/${YYYY}/${MM}/
 #
 dummyRAVE=${DATADIR_CHEM}/emissions/fire/processed/rave/${MESH_NAME}_dummy_rave.nc
 mkdir -p ${RAVE_OUTPUTDIR}
@@ -161,6 +167,7 @@ do
    if [[ -r "${RAVE_OUTPUTDIR}/${MESH_NAME}-RAVE-${timestr1}.nc" ]]; then
       ln -sf ${RAVE_OUTPUTDIR}/${MESH_NAME}-RAVE-${timestr1}.nc ${EMISFILE}
       ncrename -v PM25,e_bb_in_smoke_fine -v FRP_MEAN,frp_in -v FRE,fre_in -v SO2,e_bb_in_so2 -v NH3,e_bb_in_nh3 ${EMISFILE}
+      ncap2 -O -s 'e_bb_in_smoke_coarse=0*e_bb_in_smoke_fine' ${EMISFILE} ${EMISFILE}
    else
       cp ${dummyRAVE} ${EMISFILE}
    fi
@@ -196,16 +203,94 @@ if [[ ! -r "${ECO_OUTPUTDIR}/ecoregions_${MESH_NAME}_mpas.nc" ]]; then
 
 fi
 ncks -A -v ecoregion_ID ${ECO_OUTPUTDIR}/ecoregions_${MESH_NAME}_mpas.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
-ncap2 -O -s 'hwp_prev24=0.0*frp_in+30.' -s 'totprcp_prev24=0.0*frp_in+0.1' -s 'fmc_prev24=0.0*frp_in+0.2' ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
-ncrename -v frp_in,frp_prev24 -v fre_in,fre_prev24 ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
+ncap2 -O -s 'hwp_prev24=0.0*frp_in+30.' -s 'totprcp_prev24=0.0*frp_in+0.1' ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
+ncrename -v frp_in,frp_prev24 -v fre_in,fre_prev24 ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
 # 
+
+n_fmc=`ls ${FMC_INPUTDIR}/fmc_${YYYY}${MM}${DD}* | wc -l`
+if [[ ${n_fmc} -gt 0 ]]; then
+  echo "Have at least some soil moisture information, will interpolate"
+     ln -s ${FMC_INPUTDIR}/* ${DATA}/
+     srun python -u ${SCRIPT}   \
+                     "FMC" \
+                     ${DATA} \
+                     ${FMC_INPUTDIR} \
+                     ${FMC_OUTPUTDIR} \
+                     ${INTERP_WEIGHTS_DIR} \
+                     ${YYYY}${MM}${DD}${HH} \
+                     ${MESH_NAME}
+  # Average for ebb2
+  ncrcat ${FMC_OUTPUTDIR}/fmc*nc ${UMBRELLA_PREP_CHEM_DATA}/fmc.init.nc
+  ncks -A -v 10h_dead_fuel_moisture_content ${UMBRELLA_PREP_CHEM_DATA}/fmc.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
+  ncrename -v 10h_dead_fuel_moisture_content,fmc_prev24 ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
+else
+  ncap2 -O -s 'fmc_prev24=0*frp_in+0.2' ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
 fi
+ 
+fi
+
+
+
 #
 #==================================================================================================
 #                                 ... Anthropogenic ...                                             
 #==================================================================================================
 #
 # --- Are we adding anthropogenic sectors?
+if [[ "${EMIS_SECTOR_TO_PROCESS}" == "rwc" ]]; then
+#
+# --- Set the file expression and lat/lon dimension names
+#
+   INPUTDIR=${DATADIR_CHEM}/emissions/anthro/raw/NEMO/RWC/total/
+   OUTPUTDIR=${DATADIR_CHEM}/emissions/anthro/processed/NEMO/RWC/total/
+   NARR_INPUTDIR=${DATADIR_CHEM}/aux/narr_reanalysis_t2m/
+   NARR_OUTPUTDIR=${DATADIR_CHEM}/aux/narr_reanalysis_t2m/
+   #
+   ${MKDIR} -p ${OUTPUTDIR}
+   # 
+   EMISFILE_RWC_PROCESSED=${EMISOUTPUTDIR}/NEMO_RWC_ANNUAL_TOTAL_${MESH_NAME}.nc
+   #
+   if [[ ! -r ${EMISFILE_RWC_PROCESSED} ]]; then
+      srun python -u ${SCRIPT} \
+                       "NEMO" \
+                       ${DATA} \
+                       ${INPUTDIR} \
+                       ${OUTPUTDIR} \
+                       ${INTERP_WEIGHTS_DIR} \
+                       ${YYYY}${MM}${DD}${HH} \
+                       ${MESH_NAME}
+
+      # Convert to how we want it
+      ncap2 -O -s 'RWC_annual_sum=PEC+POC+PMOTHR' ${EMISFILE_RWC_PROCESSED} ${EMISFILE_RWC_PROCESSED}
+      ncap2 -O -s 'RWC_annual_sum_smoke_fine=PEC+POC' ${EMISFILE_RWC_PROCESSED}  ${EMISFILE_RWC_PROCESSED}
+      ncap2 -O -s 'RWC_annual_sum_smoke_coarse=0*RWC_annual_sum_smoke_fine' ${EMISFILE_RWC_PROCESSED}  ${EMISFILE_RWC_PROCESSED}
+      ncrename -v PMOTHR,RWC_annual_sum_unspc_fine ${EMISFILE_RWC_PROCESSED}
+      ncrename -v PMC,RWC_annual_sum_unspc_coarse ${EMISFILE_RWC_PROCESSED}
+   fi
+
+   # Regrid the summed minimum temperature equation:
+   EMISFILE_DENOM_PROCESSED=${OUTPUTDIR}/NEMO_RWC_DENOMINATOR_2017_${MESH_NAME}.nc
+   #
+   if [[ ! -r ${EMISFILE_DENOM_PROCESSED} ]] ; then
+        
+        srun python -u ${SCRIPT} \
+            "NARR" \
+            ${DATA} \
+            ${NARR_INPUTDIR} \
+            ${NARR_OUTPUTDIR} \
+            ${INTERP_WEIGHTS_DIR} \
+            ${YYYY}${MM}${DD}${HH} \
+            ${MESH_NAME}
+   fi
+   #
+   ncks -A -v RWC_annual_sum,RWC_annual_sum_smoke_fine,RWC_annual_sum_smoke_coarse,RWC_annual_sum_unspc_fine,RWC_annual_sum_unspc_coarse ${EMISFILE_RWC_PROCESSED} ${EMISFILE_DENOM_PROCESSED}
+   #
+   LINKEDEMISFILE=${UMBRELLA_PREP_CHEM_DATA}/rwc.init.nc
+   #
+   ${LN} -sf ${EMISFILE_DENOM_PROCESSED} ${LINKEDEMISFILE}   
+fi
+
+
 if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
 #
 # --- Set the file expression and lat/lon dimension names
@@ -216,43 +301,6 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
    ANTHROEMIS_OUTPUTDIR=${DATADIR_CHEM}/emissions/anthro/processed/${ANTHRO_EMISINV}/${MOY}/${DOW_STRING}/
    ${MKDIR} -p ${ANTHROEMIS_OUTPUTDIR}
    
-   if [[ "${ANTHRO_EMISINV}" == "NEMO" ]]; then # very different processing for NEMO emis
-    EMISFILE_RWC_RAW=${ANTHROEMIS_STATICDIR}/RWC/total/NEMO_RWC_POC_PEC_PMOTHR.annual.2017_Time.nc
-    EMISFILE_RWC_PROCESSED=${EMISOUTPUTDIR}/NEMO_RWC_ANNUAL_TOTAL_${MESH_NAME}.nc
-    if [[ ! -r ${EMISFILE_RWC_PROCESSED} ]]; then
-           srun python -u ${SCRIPT} \
-                            "NEMO" \
-                            ${DATA} \
-                            ${ANTHROEMIS_INPUTDIR} \
-                            ${ANTHROEMIS_OUTPUTDIR} \
-                            ${INTERP_WEIGHTS_DIR} \
-                            ${YYYY}${MM}${DD}${HH} \
-                            ${MESH_NAME}
-       # Convert to how we want it
-       ncap2 -O -s 'RWC_annual_sum=PEC+POC+PMOTHR' ${EMISFILE_RWC_PROCESSED} ${EMISFILE_RWC_PROCESSED}
-       ncap2 -O -s 'RWC_annual_sum_smoke_fine=PEC+POC' ${EMISFILE_RWC_PROCESSED}  ${EMISFILE_RWC_PROCESSED}
-       ncap2 -O -s 'RWC_annual_sum_smoke_coarse=0*RWC_annual_sum_smoke_fine' ${EMISFILE_RWC_PROCESSED}  ${EMISFILE_RWC_PROCESSED}
-       ncrename -v PMOTHR,RWC_annual_sum_unspc_fine ${EMISFILE_RWC_PROCESSED}
-       ncrename -v PMC,RWC_annual_sum_unspc_coarse ${EMISFILE_RWC_PROCESSED}
-    fi
-    # Regrid the summed minimum temperature equation:
-    EMISFILE_DENOM_RAW=${DATADIR_CHEM}/aux/narr_reanalysis_t2m/rwc_emission_denominator.2017.nc
-    EMISFILE_DENOM_PROCESSED=${EMISOUTPUTDIR}/NEMO_RWC_DENOMINATOR_2017_${MESH_NAME}.nc
-    if [[ ! -r ${EMISFILE_DENOM} ]] ; then
-         srun ${nt} python -u ${SCRIPT} \
-             "NARR" \
-             ${DATA} \
-             ${ANTHROEMIS_INPUTDIR} \
-             ${ANTHROEMIS_OUTPUTDIR} \
-             ${INTERP_WEIGHTS_DIR} \
-             ${YYYY}${MM}${DD}${HH} \
-             ${MESH_NAME}
-    fi
-    ncks -A -v RWC_annual_sum,RWC_annual_sum_smoke_fine,RWC_annual_sum_smoke_coarse,RWC_annual_sum_unspc_fine,RWC_annual_sum_unspc_coarse ${EMISFILE_RWC_PROCESSED} ${EMISFILE_DENOM_PROCESSED}
-    LINKEDEMISFILE=${UMBRELLA_PREP_CHEM_DATA}/rwc.init.nc
-    ${LN} -sf ${EMISFILE_DENOM_PROCESSED} ${LINKEDEMISFILE}   
- 
-   elif [[ "${ANTHRO_EMISINV}" == "GRA2PES" ]]; then
     #
     EMISFILE_BASE_RAW1=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM}/${DOW_STRING}/GRA2PESv1.0_total_2021${MM}_${DOW_STRING}_00to11Z.nc
     EMISFILE_BASE_RAW2=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM}/${DOW_STRING}/GRA2PESv1.0_total_2021${MM}_${DOW_STRING}_12to23Z.nc
@@ -322,7 +370,6 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
              done
           fi # Did inerp succeed?
     fi # Do the emission files exist
-   fi # NEMO vs. GRAPES
 fi # anthro?
 
 #==================================================================================================

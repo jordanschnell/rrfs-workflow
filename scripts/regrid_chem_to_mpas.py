@@ -164,7 +164,7 @@ class RaveToMpasRegridContext(BaseModel):
                     "time_size": self.time_size,
                     "num_cells": self.num_cells,
                 }
-                if field_name in ("FRE", "FRP_MEAN","RWC_denominator","ecoregion_ID"):
+                if field_name in ("FRE", "FRP_MEAN","RWC_denominator","ecoregion_ID","10h_dead_fuel_moisture_content"):
                     app = RaveField2d.model_validate(init_data)
                 elif field_name in ("PM25", "NH3", "SO2","DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL","PEC","POC","PMOTHR","PM25-PRI","PM10-PRI"):
                     app = RaveField3d.model_validate(init_data)
@@ -275,7 +275,7 @@ class RaveToMpasRegridProcessor:
               self._regridder = esmpy.Regrid(
                    srcfield=src_fwrap.value,
                    dstfield=self._dst_field,
-                   regrid_method=esmpy.RegridMethod.CONSERVE_2ND,
+                   regrid_method=esmpy.RegridMethod.CONSERVE,
                    unmapped_action=esmpy.UnmappedAction.IGNORE,
                    ignore_degenerate=True,
                    filename=str(self.context.weight_path),
@@ -483,6 +483,11 @@ class RaveToMpasRegridProcessor:
             ).create_field_wrapper()
             area_data = area_fwrap.value.data
         
+        if field_name in ("PM25-PRI", "PM10-PRI"):
+           conv_aer = 1.e6 / 3600.
+        else:
+           conv_aer = 1.0
+
         src_data = src_fwrap.value.data
         if field_name in ("PM25", "NH3", "SO2"):
         # If RAVE emissions, convert to ug/m2/s
@@ -493,7 +498,7 @@ class RaveToMpasRegridProcessor:
         #elif field_name in ("ENL_POLL","GRA_POLL","DBL_POLL","WEE_POLL"):
         #    src_data[:] = np.where(dur_data <0. , -999., src_data)
         else:
-            src_data[:] = np.where(src_data < 0.0, 0.0, src_data)
+            src_data[:] = np.where(src_data < 0.0, 0.0, conv_aer * src_data)
         return src_fwrap
 
     def get_src_gwrap(self) -> GridWrapper:
@@ -570,25 +575,24 @@ def main() -> None:
        level_out_size = 1
        time_name  = "time"
        time_size  = 1
-       #InterpMethod = "CONSERVE"
-       InterpMethod = "BILINEAR"
+       InterpMethod = "CONSERVE"
+       #InterpMethod = "BILINEAR"
     elif dataset_name == "GRA2PES":
        field_names = ("PM25-PRI","PM10-PRI")
-       x_center = "XLONG"
-       y_center = "XLAT"
+       x_center = "XLONG" #"XLONG_M"
+       y_center = "XLAT" #"XLAT_M"
        x_dim    = "west_east"
        y_dim    = "south_north"
-       x_corner = None
-       y_corner = None
-       x_corner_dim = None
-       y_corner_dim = None
+       x_corner = "XLONG_C"
+       y_corner = "XLAT_C"
+       x_corner_dim = "west_east_stag"
+       y_corner_dim = "south_north_stag"
        level_in_name = "bottom_top"
-       #level_in_size = 20
        level_out_name = "nkemit"
        level_out_size = 20
        time_name  = "Time"
        time_size  = 12
-       InterpMethod = "BILINEAR"
+       InterpMethod = "CONSERVE"
     elif dataset_name == "NEMO":
        field_names = ("POC","PEC","PMOTHR")
        x_center = "lon"
@@ -597,10 +601,9 @@ def main() -> None:
        y_dim    = "ROW"
        x_corner = "lonc"
        y_corner = "latc"
-       x_corner_dim = ("COLC",)
-       y_corner_dim = ("ROWC",)
+       x_corner_dim = "COLC"
+       y_corner_dim = "ROWC"
        level_in_name = "None"
-       #level_in_size = None
        level_out_name = "nkemit"
        level_out_size = 1
        time_name  = "Time"
@@ -617,14 +620,11 @@ def main() -> None:
        x_corner_dim = "COLC"
        y_corner_dim = "ROWC"
        level_in_name = "None"
-       #level_in_size = None
        level_out_name= "nkbio"
        level_out_size = 1
        time_name  = "time"
        time_size  = 1
        InterpMethod = "CONSERVE"
-#       InterpMethod = "BILINEAR"
-#       InterpMask = lmask
     elif dataset_name == "ECOREGION":
        field_names = ("ecoregion_ID",)
        x_center = "geolon"
@@ -636,14 +636,13 @@ def main() -> None:
        x_corner_dim = None
        y_corner_dim = None
        level_in_name = "None"
-       #level_in_size = None
        level_out_name = "nkfire"
        level_out_size = 1
        time_name  = "time"
        time_size  = 1
        InterpMethod = "NEAREST_STOD"
     elif dataset_name == "NARR":
-       field_names = ("air",)
+       field_names = ("RWC_denominator",)
        x_center = "lon"
        y_center = "lat"
        x_dim    = "x"
@@ -653,19 +652,20 @@ def main() -> None:
        x_corner_dim = None
        y_corner_dim = None
        level_in_name = "None"
-       #level_in_size = None
        level_out_name = "nkemit"
-       level_out_size = None
+       level_out_size = 1
        time_name  = "Time"
        time_size  = 1
        InterpMethod = "BILINEAR"
     elif dataset_name == "FMC": # fuel moisture content
-       field_names = ("10h_dead_fuel_moisture_content")
+       field_names = ("10h_dead_fuel_moisture_content",)
        dates_needed = []
        for i in range(24):
           x = datetime(int(YYYY),int(MM),int(DD),int(HH),0,0) - timedelta(hours=i)
           y = x.strftime("%Y%m%d%H")
           dates_needed.append(y)
+       print("JLS, dates needed for FMC")
+       print(dates_needed)
        x_center = "longitude"
        y_center = "latitude"
        x_dim    = "nx"
@@ -675,11 +675,10 @@ def main() -> None:
        x_corner_dim = None
        y_corner_dim = None
        level_in_name = "None"
-       #level_in_size = None
        level_out_name = "nkfire"
-       level_out_size = None
-       time_name  = None
-       time_size  = None
+       level_out_size = 1
+       time_name  = "time"
+       time_size  = 1
        InterpMethod = "BILINEAR"
     
     weight_path = Path( weight_dir + "/weights_" + dataset_name + "-to-" + "mpas_" + mesh_name + "_" + InterpMethod + ".nc")
@@ -727,6 +726,7 @@ def main() -> None:
     
     elif dataset_name == "FMC":
        for date_to_process in dates_needed:
+          print("JLS, looking for file " + input_dir + "fmc_" + date_to_process + ".nc")
           rave_paths = glob.glob(input_dir + "fmc_" + date_to_process + ".nc")
           rave_path=rave_paths[0]
           new_dst_path = Path ( output_dir + "fmc_" + date_to_process +"_" + mesh_name + ".nc")
@@ -752,7 +752,6 @@ def main() -> None:
               x_corner_dim=x_corner_dim,
               y_corner_dim=y_corner_dim,
               level_in_name=level_in_name,
-              #level_in_size=level_in_size,
               level_out_name=level_out_name,
               level_out_size=level_out_size,
               time_name=time_name,
@@ -790,7 +789,6 @@ def main() -> None:
            x_corner_dim=x_corner_dim,
            y_corner_dim=y_corner_dim,
            level_in_name=level_in_name,
-           #level_in_size=level_in_size,
            level_out_name=level_out_name,
            level_out_size=level_out_size,
            time_name=time_name,
@@ -827,7 +825,6 @@ def main() -> None:
            x_corner_dim=x_corner_dim,
            y_corner_dim=y_corner_dim,
            level_in_name=level_in_name,
-           #level_in_size=level_in_size,
            level_out_name=level_out_name,
            level_out_size=level_out_size,
            time_name=time_name,
@@ -846,8 +843,11 @@ def main() -> None:
           rave_path    = Path( input_dir  + "/pollen_obs_" + YYYY + "_BELD6_ef_T_" + JJJ +".nc")
           new_dst_path = Path( output_dir + "/pollen_ef_"+mesh_name+"_"+YYYY+"_"+JJJ+".nc")
        elif dataset_name == "NEMO":
-          rave_path    = ""
-          new_dst_path = Path(output_dir + "/NEMO_"+mesh_name+".nc")
+          rave_path    = Path ( input_dir + "/NEMO_RWC_POC_PEC_PMOTHR.annual.2017_Time.nc")
+          new_dst_path = Path ( output_dir +"/NEMO_RWC_ANNUAL_TOTAL_"+mesh_name+".nc")
+       elif dataset_name == "NARR":
+          rave_path    = Path ( input_dir + "/rwc_emission_denominator.2017.nc")
+          new_dst_path = Path ( output_dir + "/NEMO_RWC_DENOMINATOR_2017_"+mesh_name+".nc")
        elif dataset_name == "ECOREGION":
           rave_path    = Path ( input_dir + "NA_RRFS_Ecoregions_and_EFsoriginal.nc") 
           new_dst_path = Path ( output_dir + "ecoregions_"+mesh_name+"_mpas.nc")
