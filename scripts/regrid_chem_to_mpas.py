@@ -164,9 +164,9 @@ class RaveToMpasRegridContext(BaseModel):
                     "time_size": self.time_size,
                     "num_cells": self.num_cells,
                 }
-                if field_name in ("FRE", "FRP_MEAN","RWC_denominator","ecoregion_ID","10h_dead_fuel_moisture_content"):
+                if field_name in ("FRE", "FRP_MEAN","RWC_denominator","ecoregion_ID","10h_dead_fuel_moisture_content","albedo_drag","clayfrac","sandfrac","uthres","uthres_sg","sep","LAI","GVF","PC","fveg","fbare","feff","lcbare","lcveg"):
                     app = RaveField2d.model_validate(init_data)
-                elif field_name in ("PM25", "NH3", "SO2","DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL","PEC","POC","PMOTHR","PM25-PRI","PM10-PRI"):
+                elif field_name in ("PM25", "NH3", "SO2","DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL","PEC","POC","PMOTHR","PM25-PRI","PM10-PRI","TPM","NOx","CH4"):
                     app = RaveField3d.model_validate(init_data)
                 else:
                     raise NotImplementedError(field_name)
@@ -372,15 +372,16 @@ class RaveToMpasRegridProcessor:
             if rave_field.name == "ENL_POLL":
                  with open_nc(self.context.new_dst_path,mode="a") as ds:
                       _LOGGER.info(f"renaming and combining tree fields")
+
                       src_fwrap_enl = self.create_src_field_wrapper(field_name='ENL_POLL')
-                      src_fwrap_dbl = self.create_src_field_wrapper(field_name='DBL_POLL')
                       dst_field_enl = self.get_dst_field()
-                      dst_field_dbl = self.get_dst_field()
-                      # tdk: any more qa stuff? minimum threshold?
                       dst_field_enl.data.fill(0.0)
-                      dst_field_dbl.data.fill(0.0)
                       regridder(src_fwrap_enl.value, dst_field_enl)
-                      regridder(src_fwrap_enl.value, dst_field_dbl)
+
+                      src_fwrap_dbl = self.create_src_field_wrapper(field_name='DBL_POLL')
+                      dst_field_dbl = self.get_dst_field()
+                      dst_field_dbl.data.fill(0.0)
+                      regridder(src_fwrap_dbl.value, dst_field_dbl)
      
                       rave_field =  self.context.rave_fields[0]
      
@@ -396,6 +397,39 @@ class RaveToMpasRegridProcessor:
                           var,
                           dims,
                           rave_field.reshape_field_data(dst_field_enl.data+dst_field_dbl.data),
+                          collective=True,
+                      )
+            if rave_field.name == "TPM":
+                 with open_nc(self.context.new_dst_path,mode="a") as ds:
+                      _LOGGER.info(f"calculating PM10 as TPM - PM25")
+                      src_fwrap_ttl = self.create_src_field_wrapper(field_name='TPM')
+                      src_fwrap_p25 = self.create_src_field_wrapper(field_name='PM25')
+                      
+                      dst_field_ttl = self.get_dst_field()
+                      dst_field_ttl.data.fill(0.0)
+                      regridder(src_fwrap_ttl.value, dst_field_ttl)
+
+                      dst_field_p25 = self.get_dst_field()
+                      dst_field_p25.data.fill(0.0)
+                      regridder(src_fwrap_p25.value, dst_field_p25)
+     
+                      rave_field =  self.context.rave_fields[0]
+     
+                      var = ds.createVariable(
+                              'PM10',
+                              rave_field.dtype,
+                              [dim.name[0] for dim in dims.value],
+                              fill_value=rave_field.fill_value,
+                      )
+                      for k, v in self.context.rave_fields[0].attrs.items():
+                          setattr(var, k, v)
+                      data1 = rave_field.reshape_field_data(dst_field_ttl.data)
+                      data2 = rave_field.reshape_field_data(dst_field_p25.data)
+                      data3 = data1 - data2
+                      set_variable_data(
+                          var,
+                          dims,
+                          data3, 
                           collective=True,
                       )
             src_fwrap.value.destroy()
@@ -474,7 +508,7 @@ class RaveToMpasRegridProcessor:
                 dim_time=(self.context.time_name,),
             ).create_field_wrapper()
         # Get the area from the RAVE file, need to convert from /grid to /m2
-        if field_name in ("PM25", "NH3", "SO2", "FRE","FRP_MEAN"):
+        if field_name in ("PM25", "NH3", "SO2", "FRE","FRP_MEAN","TPM","CH4"):
             area_fwrap = NcToField(
                 path=self.context.src_path,
                 name='area',
@@ -485,18 +519,22 @@ class RaveToMpasRegridProcessor:
         
         if field_name in ("PM25-PRI", "PM10-PRI"):
            conv_aer = 1.e6 / 3600.
+        elif field_name == "CH4":
+           conv_aer = (1.0 / 16.0) * 1000.  
         else:
            conv_aer = 1.0
 
+
         src_data = src_fwrap.value.data
-        if field_name in ("PM25", "NH3", "SO2"):
-        # If RAVE emissions, convert to ug/m2/s
+        if field_name in ("PM25","TPM"):
+        # If RAVE aerosol emissions, convert to ug/m2/s
             src_data[:] = np.where(src_data < 0.0, 0.0, src_data*1.e3/area_data[:,:,np.newaxis]/3600.)
+        elif field_name in ("CH4","NH3","SO2"):
+        # If RAVE gas emissions, convert to mol/m2/s
+            src_data[:] = np.where(src_data < 0.0, 0.0, conv_aer*src_data/area_data[:,:,np.newaxis]/3600.)
         elif field_name in ("FRE","FRP_MEAN"):
         # For FRE, FRP, don't multiply area by 1.e6, cancelled out by MW to W conversion
             src_data[:] = np.where(src_data < 0.0, 0.0, src_data/(area_data[:,:,np.newaxis]))
-        #elif field_name in ("ENL_POLL","GRA_POLL","DBL_POLL","WEE_POLL"):
-        #    src_data[:] = np.where(dur_data <0. , -999., src_data)
         else:
             src_data[:] = np.where(src_data < 0.0, 0.0, conv_aer * src_data)
         return src_fwrap
@@ -552,7 +590,7 @@ def main() -> None:
         #lmask[:] = np.where(xland > 0,1,0)
 
     if dataset_name == "RAVE":
-       field_names = ("FRE", "FRP_MEAN", "PM25", "NH3", "SO2")
+       field_names = ("TPM","FRE", "FRP_MEAN", "PM25", "NH3", "SO2","CH4")
        # JLS, TODO - NEED TO ACCOUNT FOR EBB1, MORE THAN 24, ETC.
        # Determine the cycle dates to process +%Y%m%d%H
        dates_needed = []
@@ -608,7 +646,8 @@ def main() -> None:
        level_out_size = 1
        time_name  = "Time"
        time_size  = 1
-       InterpMethod = "CONSERVE"
+#       InterpMethod = "CONSERVE"
+       InterpMethod = "BILINEAR"
     elif dataset_name == "PECM":
        field_names = ("DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL")
        x_center = "lon"
@@ -656,6 +695,22 @@ def main() -> None:
        level_out_size = 1
        time_name  = "Time"
        time_size  = 1
+       InterpMethod = "BILINEAR"
+    elif dataset_name == "FENGSHA":
+       field_names = ("albedo_drag","clayfrac","sandfrac","uthres","uthres_sg","sep","LAI","GVF","PC","fveg","fbare","feff","lcbare","lcveg")
+       x_center = "lon2d"
+       y_center = "lat2d"
+       x_dim    = "lon"
+       y_dim    = "lat"
+       x_corner = None
+       y_corner = None
+       x_corner_dim = None
+       y_corner_dim = None
+       level_in_name = "None"
+       level_out_name = "nkemit"
+       level_out_size = 1
+       time_name  = "time"
+       time_size  = 12
        InterpMethod = "BILINEAR"
     elif dataset_name == "FMC": # fuel moisture content
        field_names = ("10h_dead_fuel_moisture_content",)
@@ -851,6 +906,10 @@ def main() -> None:
        elif dataset_name == "ECOREGION":
           rave_path    = Path ( input_dir + "NA_RRFS_Ecoregions_and_EFsoriginal.nc") 
           new_dst_path = Path ( output_dir + "ecoregions_"+mesh_name+"_mpas.nc")
+       elif dataset_name == "FENGSHA":
+          rave_path    = Path ( input_dir + "fengsha_dust_inputs.nc")
+          new_dst_path = Path ( output_dir + "fengsha_dust_inputs."+mesh_name+".nc")
+      
     
        context = RaveToMpasRegridContext(
            dataset_name=dataset_name,
