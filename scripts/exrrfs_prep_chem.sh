@@ -106,7 +106,7 @@ else
 fi
 #
 MPAS_BASEFILE=${DATADIR_CHEM}/grids/domain_latlons/mpas_${MESH_NAME}_init.nc
-SCRIPT=${HOMErrfs}/scripts/regrid_chem_to_mpas.plusDust.py
+SCRIPT=${HOMErrfs}/scripts/regrid_chem_to_mpas.py
 INTERP_WEIGHTS_DIR=${DATADIR_CHEM}/grids/interpolation_weights/  
 #
 # Set a few things for the CONDA environment
