@@ -112,10 +112,23 @@ class RaveField3d(AbstractRaveField):
                 self.nklevel_dimension,
             )
         )
-
     def reshape_field_data(self, target: np.ndarray) -> np.ndarray:
         return target.reshape(1, -1, 1)
 
+class RaveField4d(AbstractRaveField):
+
+    def create_dimension_collection(
+        self, ncells_bounds: tuple[int, int]
+    ) -> DimensionCollection:
+        return DimensionCollection(
+            value=(
+                self.create_ncells_dimension(ncells_bounds),
+                self.nklevel_dimension,
+                self.time_dimension,
+            )
+        )
+    def reshape_field_data(self, target: np.ndarray) -> np.ndarray:
+        return target.reshape(-1, 20, 12)
 
 class RaveToMpasRegridContext(BaseModel):
     dataset_name: str
@@ -166,8 +179,11 @@ class RaveToMpasRegridContext(BaseModel):
                 }
                 if field_name in ("FRE", "FRP_MEAN","RWC_denominator","ecoregion_ID","10h_dead_fuel_moisture_content","albedo_drag","clayfrac","sandfrac","uthres","uthres_sg","sep","LAI","GVF","PC","fveg","fbare","feff","lcbare","lcveg"):
                     app = RaveField2d.model_validate(init_data)
-                elif field_name in ("PM25", "NH3", "SO2","DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL","PEC","POC","PMOTHR","PM25-PRI","PM10-PRI","TPM","NOx","CH4"):
+                elif field_name in ("PM25", "NH3", "SO2","DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL","PEC","POC","PMOTHR","TPM","NOx","CH4"):
                     app = RaveField3d.model_validate(init_data)
+# GRAPES anthro data - 12 x 20 x lat x lon --> (latXlon) x (level) x (time) -----(then, back in the shell script)----> Time x nCells x nkemit
+                elif field_name in ("HC01","PM25-PRI","PM10-PRI"):
+                    app = RaveField4d.model_validate(init_data)
                 else:
                     raise NotImplementedError(field_name)
                 rave_fields.append(app)
@@ -250,9 +266,21 @@ class RaveToMpasRegridProcessor:
         )
 
 # Check for extra dims beyond lat/lon
-        if self.context.level_out_size > 1 or self.context.time_size > 1:
+        if self.context.level_out_size > 1 and self.context.time_size > 1:
+           print("JLS, creating destination field with multiple levels and multiple times")
            self._dst_field = esmpy.Field(
                dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT,ndbounds=(self.context.level_out_size,self.context.time_size)
+           )
+           print(self._dst_field)
+        elif self.context.level_out_size > 1 and self.context.time_size == 1:
+           print("JLS, creating destination field with multiple multiple levels")
+           self._dst_field = esmpy.Field(
+               dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT,ndbounds=(self.context.level_out_size,)
+           )
+        elif self.context.level_out_size == 1 and self.context.time_size > 1:
+           print("JLS, creating destination field with multiple multiple times")
+           self._dst_field = esmpy.Field(
+               dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT,ndbounds=(self.context.time_size,)
            )
         else:
            _LOGGER.info("create destination field")
@@ -276,6 +304,16 @@ class RaveToMpasRegridProcessor:
                    srcfield=src_fwrap.value,
                    dstfield=self._dst_field,
                    regrid_method=esmpy.RegridMethod.CONSERVE,
+                   unmapped_action=esmpy.UnmappedAction.IGNORE,
+                   ignore_degenerate=True,
+                   filename=str(self.context.weight_path),
+               )
+           elif self.context.InterpMethod == "CONSERVE_2ND":
+              _LOGGER.info("using 2nd order conservative interp")
+              self._regridder = esmpy.Regrid(
+                   srcfield=src_fwrap.value,
+                   dstfield=self._dst_field,
+                   regrid_method=esmpy.RegridMethod.CONSERVE_2ND,
                    unmapped_action=esmpy.UnmappedAction.IGNORE,
                    ignore_degenerate=True,
                    filename=str(self.context.weight_path),
@@ -338,9 +376,12 @@ class RaveToMpasRegridProcessor:
             regridder(src_fwrap.value, dst_field)
             # tdk: support NcToMesh
             local_bounds = (dst_field.lower_bounds[0], dst_field.upper_bounds[0])
+            print("JLS, local bounds")
+            print(local_bounds)
             reconciled_bounds = reconcile_bounds(local_bounds)
             dims = rave_field.create_dimension_collection(reconciled_bounds)
             _LOGGER.info(f"{dims=}")
+            print(dims)
             _LOGGER.info(f"writing field to netcdf")
             with open_nc(self.context.new_dst_path, mode="a") as ds:
                 if rave_field.name in ("FRP_MEAN","FRE"):
@@ -492,7 +533,7 @@ class RaveToMpasRegridProcessor:
 
     def create_src_field_wrapper(self, field_name: str) -> FieldWrapper:
         _LOGGER.info("create source field")
-        if field_name in ("PM25-PRI","PM10-PRI"):
+        if field_name in ("PM25-PRI","PM10-PRI","HC01"):
             src_fwrap = NcToField(
                 path=self.context.src_path,
                 name=field_name,
@@ -519,6 +560,8 @@ class RaveToMpasRegridProcessor:
         
         if field_name in ("PM25-PRI", "PM10-PRI"):
            conv_aer = 1.e6 / 3600.
+        elif field_name == "HC01":
+           conv_aer = 1.e-6 / 3600.
         elif field_name == "CH4":
            conv_aer = (1.0 / 16.0) * 1000.  
         else:
@@ -537,6 +580,8 @@ class RaveToMpasRegridProcessor:
             src_data[:] = np.where(src_data < 0.0, 0.0, src_data/(area_data[:,:,np.newaxis]))
         else:
             src_data[:] = np.where(src_data < 0.0, 0.0, conv_aer * src_data)
+
+        src_data[:] = np.where(np.isnan(src_data), 0.0, src_data)
         return src_fwrap
 
     def get_src_gwrap(self) -> GridWrapper:
@@ -616,7 +661,7 @@ def main() -> None:
        InterpMethod = "CONSERVE"
        #InterpMethod = "BILINEAR"
     elif dataset_name == "GRA2PES":
-       field_names = ("PM25-PRI","PM10-PRI")
+       field_names = ("PM25-PRI","PM10-PRI","HC01")
        x_center = "XLONG" #"XLONG_M"
        y_center = "XLAT" #"XLAT_M"
        x_dim    = "west_east"
@@ -631,6 +676,7 @@ def main() -> None:
        time_name  = "Time"
        time_size  = 12
        InterpMethod = "CONSERVE"
+       #InterpMethod = "BILINEAR"
     elif dataset_name == "NEMO":
        field_names = ("POC","PEC","PMOTHR")
        x_center = "lon"
@@ -646,8 +692,8 @@ def main() -> None:
        level_out_size = 1
        time_name  = "Time"
        time_size  = 1
-#       InterpMethod = "CONSERVE"
-       InterpMethod = "BILINEAR"
+       InterpMethod = "CONSERVE"
+#       InterpMethod = "BILINEAR"
     elif dataset_name == "PECM":
        field_names = ("DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL")
        x_center = "lon"
@@ -821,7 +867,7 @@ def main() -> None:
           _LOGGER.info("success")
 #
     elif dataset_name == "GRA2PES":
-       rave_path    = Path( input_dir + "/GRA2PESv1.0_total_2021" + MM + "_" + DOWs +"_00to11Z.nc")
+       rave_path    = Path( input_dir + "/GRA2PESv1.0_total_2023" + MM + "_" + DOWs +"_00to11Z.nc")
        new_dst_path = Path(output_dir + "/" +dataset_name+"_"+mesh_name+"_00to11Z.nc")
        context = RaveToMpasRegridContext(
            dataset_name=dataset_name,
@@ -857,7 +903,7 @@ def main() -> None:
       
        _LOGGER.info("success")
        
-       rave_path    = Path( input_dir + "/GRA2PESv1.0_total_2021" + MM + "_" + DOWs +"_12to23Z.nc")
+       rave_path    = Path( input_dir + "/GRA2PESv1.0_total_2023" + MM + "_" + DOWs +"_12to23Z.nc")
        new_dst_path = Path(output_dir + "/" +dataset_name+"_"+mesh_name+"_12to23Z.nc")
        context = RaveToMpasRegridContext(
            dataset_name=dataset_name,

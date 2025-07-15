@@ -160,7 +160,10 @@ mv *.log *.ESMF_LogFile logs || echo "could not move logs"
 for ihour in $(seq 0 ${FCST_LENGTH}); 
 do
 #
-   timestr1=`date +%Y%m%d%H -d "$previous_day + $ihour hours"`
+   if [[ ${ihour} -gt 24 ]]; then
+      ihour2=$((${ihour}-24))
+   fi
+   timestr1=`date +%Y%m%d%H -d "$previous_day + $ihour2 hours"`
    timestr2=`date +%Y-%m-%d_%H -d "$current_day + $ihour hours"`
    timestr3=`date +%Y-%m-%d_%H:00:00 -d "$current_day + $ihour hours"`
 #
@@ -300,13 +303,15 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
 #
    ANTHROEMIS_STATICDIR=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/
    #
-   ANTHROEMIS_INPUTDIR=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM}/${DOW_STRING}/
+   GRA2PES_VERSION=total_plus_methane_final_7-15-2025
+   #
+   ANTHROEMIS_INPUTDIR=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/${GRA2PES_VERSION}/2023${MM}/${DOW_STRING}/
    ANTHROEMIS_OUTPUTDIR=${DATADIR_CHEM}/emissions/anthro/processed/${ANTHRO_EMISINV}/${MOY}/${DOW_STRING}/
    ${MKDIR} -p ${ANTHROEMIS_OUTPUTDIR}
    
     #
-    EMISFILE_BASE_RAW1=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM}/${DOW_STRING}/GRA2PESv1.0_total_2021${MM}_${DOW_STRING}_00to11Z.nc
-    EMISFILE_BASE_RAW2=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/total/2021${MM}/${DOW_STRING}/GRA2PESv1.0_total_2021${MM}_${DOW_STRING}_12to23Z.nc
+    EMISFILE_BASE_RAW1=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/${GRA2PES_VERSION}/2023${MM}/${DOW_STRING}/GRA2PESv1.0_total_2023${MM}_${DOW_STRING}_00to11Z.nc
+    EMISFILE_BASE_RAW2=${DATADIR_CHEM}/emissions/anthro/raw/${ANTHRO_EMISINV}/${GRA2PES_VERSION}/2023${MM}/${DOW_STRING}/GRA2PESv1.0_total_2023${MM}_${DOW_STRING}_12to23Z.nc
     INPUT_GRID=${DATADIR_CHEM}/grids/domain_latlons/GRA2PESv1.0_CONUS4km_grid_info.nc
 
     #
@@ -331,10 +336,7 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
              ${ECHO} "ERROR: Did not interpolate ${ANTHRO_EMISINV}"
              exit 1
           else
-             # TODO Rearrange the dimension inside of interp script
-             ncpdq -O -a Time,nCells,nkemit ${EMISFILE1} ${EMISFILE1}
              ncks -O --mk_rec_dmn Time ${EMISFILE1} ${EMISFILE1}
-             ncpdq -O -a Time,nCells,nkemit ${EMISFILE2} ${EMISFILE2}
              ncks -O --mk_rec_dmn Time ${EMISFILE2} ${EMISFILE2}
              ncks -O -6  ${EMISFILE1} ${EMISFILE1}
              ncks -O -6  ${EMISFILE2} ${EMISFILE2}
@@ -357,12 +359,16 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
                  t_ix=$((10#$HH_EMIS-${offset}))
                  #
                  EMISFILE_FINAL=${ANTHROEMIS_OUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_${HH_EMIS}Z.nc
+                 # Reorder
+                 ${ECHO} "Reordering dimensions -- cell x level x time -- >  Time x Cell x Level "
+                 ncpdq -O -a Time,nCells,nkemit ${EMISFILE_FINAL} ${EMISFILE_FINAL}
                  if [[ -r ${EMISFILE_FINAL} ]]; then
                     ${LN} -sf ${EMISFILE_FINAL} ${LINKEDEMISFILE}
                  else
                     ncks -d Time,${t_ix},${t_ix} ${EMISFILE} ${EMISFILE_FINAL}
                     ${ECHO} "Created file #${ihour}/${FCST_LENGTH} at ${EMISFILE_FINAL}"
                     ncrename -v PM25-PRI,e_ant_in_unspc_fine -v PM10-PRI,e_ant_in_unspc_coarse ${EMISFILE_FINAL}
+                    ncrename -v HC01,e_ant_in_ch4 ${EMISFILE_FINAL}
                   # TODO, other species
                     ncap2 -O -s 'e_ant_in_smoke_fine=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
                     ncap2 -O -s 'e_ant_in_smoke_coarse=0.0*e_ant_in_unspc_fine' ${EMISFILE_FINAL} ${EMISFILE_FINAL}
