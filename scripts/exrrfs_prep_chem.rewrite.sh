@@ -162,6 +162,7 @@ do
 #
    timestr1=`date +%Y%m%d%H -d "$previous_day + $ihour hours"`
    timestr2=`date +%Y-%m-%d_%H -d "$current_day + $ihour hours"`
+   timestr3=`date +%Y-%m-%d_%H:00:00 -d "$current_day + $ihour hours"`
 #
    EMISFILE=${UMBRELLA_PREP_CHEM_DATA}/smoke.init.retro.${timestr2}.00.00.nc
    if [[ -r "${RAVE_OUTPUTDIR}/${MESH_NAME}-RAVE-${timestr1}.nc" ]]; then
@@ -172,19 +173,15 @@ do
       cp ${dummyRAVE} ${EMISFILE}
    fi
    ncks -O -6 ${EMISFILE} ${EMISFILE}
-   ncks -A -v xtime ${DATA}/${MESH_NAME}.init.nc ${EMISFILE} 
+   ncks -A -v xtime ${DATA}/${MESH_NAME}.init.nc ${EMISFILE}
+   ncap2 -O -s xtime=\"${timestr3}\" ${EMISFILE} ${EMISFILE}  
 #
 done
 #
-#TODO - add xtime to file
-#TODO - determine what to do with e_bb_out_smoke_coarse
 rm -f ${TEMPDIR}/*
 #
-# Average for ebb2
+# Concatenate for ebb2
 ncrcat ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.retro.*.00.00.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
-#
-#echo "Appending emiss_factor to smoke.init"
-#ncks -A -v emiss_factor ${ECOREGION_PROCESSED} ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
 #
 # Calculate previous 24 hour average HWP
 #
@@ -203,6 +200,9 @@ if [[ ! -r "${ECO_OUTPUTDIR}/ecoregions_${MESH_NAME}_mpas.nc" ]]; then
 
 fi
 ncks -A -v ecoregion_ID ${ECO_OUTPUTDIR}/ecoregions_${MESH_NAME}_mpas.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
+#
+# TODO - PROCESS HWP/PRECIP
+#
 ncap2 -O -s 'hwp_prev24=0.0*frp_in+30.' -s 'totprcp_prev24=0.0*frp_in+0.1' ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
 ncrename -v frp_in,frp_prev24 -v fre_in,fre_prev24 ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
 # 
@@ -220,12 +220,15 @@ if [[ ${n_fmc} -gt 0 ]]; then
                      ${YYYY}${MM}${DD}${HH} \
                      ${MESH_NAME}
   # Average for ebb2
-  ncrcat ${FMC_OUTPUTDIR}/fmc*nc ${UMBRELLA_PREP_CHEM_DATA}/fmc.init.nc
+  ncrcat ${FMC_OUTPUTDIR}/fmc*${MESH_NAME}*nc ${UMBRELLA_PREP_CHEM_DATA}/fmc.init.nc
   ncks -A -v 10h_dead_fuel_moisture_content ${UMBRELLA_PREP_CHEM_DATA}/fmc.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
   ncrename -v 10h_dead_fuel_moisture_content,fmc_prev24 ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
 else
-  ncap2 -O -s 'fmc_prev24=0*frp_in+0.2' ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
+  ncap2 -O -s 'fmc_prev24=0*frp_prev24+0.2' ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
 fi
+
+# Cut out only the first 24 hours
+ncks -O -d Time,0,23 ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
  
 fi
 
@@ -248,7 +251,7 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "rwc" ]]; then
    #
    ${MKDIR} -p ${OUTPUTDIR}
    # 
-   EMISFILE_RWC_PROCESSED=${EMISOUTPUTDIR}/NEMO_RWC_ANNUAL_TOTAL_${MESH_NAME}.nc
+   EMISFILE_RWC_PROCESSED=${OUTPUTDIR}/NEMO_RWC_ANNUAL_TOTAL_${MESH_NAME}.nc
    #
    if [[ ! -r ${EMISFILE_RWC_PROCESSED} ]]; then
       srun python -u ${SCRIPT} \
@@ -269,7 +272,7 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "rwc" ]]; then
    fi
 
    # Regrid the summed minimum temperature equation:
-   EMISFILE_DENOM_PROCESSED=${OUTPUTDIR}/NEMO_RWC_DENOMINATOR_2017_${MESH_NAME}.nc
+   EMISFILE_DENOM_PROCESSED=${NARR_OUTPUTDIR}/NEMO_RWC_DENOMINATOR_2017_${MESH_NAME}.nc
    #
    if [[ ! -r ${EMISFILE_DENOM_PROCESSED} ]] ; then
         

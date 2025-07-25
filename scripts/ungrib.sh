@@ -96,10 +96,10 @@ if [[ $INTERP == 1 ]]; then
     # Merge vector field records
     ${WGRIB2} tmp.grib2 -not aerosol=Dust -new_grid_vectors "UGRD:VGRD:USTM:VSTM:VUCSH:VVCSH" -submsg_uv tmp2.grib2
 
-    if [ -e tmp2.grib2 ] ; then
-      ln -sf tmp2.grib2 GRIBFILE.AAA
+    if [ -e tmp.grib2 ] ; then
+      ln -sf tmp.grib2 GRIBFILE.AAA
     else
-      echo "tmp2.grib2 not created; exiting"
+      echo "tmp.grib2 not created; exiting"
       exit 1
     fi
 

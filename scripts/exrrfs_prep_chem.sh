@@ -95,9 +95,14 @@ if [ -z "${INTERP_METHOD}" ]; then
    export INTERP_METHOD="bilinear"
 fi
 #
+INITFILE=/lfs5/BMC/rtwbl/rap-chem/mpas_conus3km/cycledir/stmp/${YYYY}${MM}${DD}${HH}/init/ctl/hrrrv5.init.nc
 # Set the init/mesh file name and link here:\
 if [[ -r ${UMBRELLA_PREP_IC_DATA}/init.nc ]]; then
     ln -sf ${UMBRELLA_PREP_IC_DATA}/init.nc ./${MESH_NAME}.init.nc
+elif [[ -r ${UMBRELLA_PREP_IC_DATA}/hrrrv5.init.nc ]]; then
+    ln -sf ${UMBRELLA_PREP_IC_DATA}/hrrrv5.init.nc ./${MESH_NAME}.init.nc
+elif [[ -r ${INITFILE} ]]; then
+    ln -sf ${INITFILE} ./${MESH_NAME}.init.nc
 elif [[ -r ${UMBRELLA_FCST_DATA}/fcst_${HH}/mpasin.nc ]]; then
     ln -sf ${UMBRELLA_FCST_DATA}/fcst_${HH}/mpasin.nc ./${MESH_NAME}.init.nc
 else
@@ -106,6 +111,7 @@ else
 fi
 #
 MPAS_BASEFILE=${DATADIR_CHEM}/grids/domain_latlons/mpas_${MESH_NAME}_init.nc
+#SCRIPT=${HOMErrfs}/scripts/regrid_chem_to_mpas.py
 SCRIPT=${HOMErrfs}/scripts/regrid_chem_to_mpas.py
 INTERP_WEIGHTS_DIR=${DATADIR_CHEM}/grids/interpolation_weights/  
 #
@@ -319,8 +325,15 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
     EMISFILE2=${ANTHROEMIS_OUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_12to23Z.nc
     #
     if [[ -r ${EMISFILE_BASE_RAW1} ]] && [[ -r ${EMISFILE_BASE_RAW2} ]]; then
-       ncks -A -v XLAT_C,XLAT_M,XLONG_C,XLONG_M ${INPUT_GRID} ${EMISFILE_BASE_RAW1}
-       ncks -A -v XLAT_C,XLAT_M,XLONG_C,XLONG_M ${INPUT_GRID} ${EMISFILE_BASE_RAW2}
+       echo "Checking to make sure we have corner coords"
+       ncdump -hv XLAT_C ${EMISFILE_BASE_RAW1}
+       if [[ $? -ne 0 ]]; then
+         echo ".. we don't, cutting in from ${INPUT_GRID}"
+         ncks -A -v XLAT_C,XLAT_M,XLONG_C,XLONG_M ${INPUT_GRID} ${EMISFILE_BASE_RAW1}
+         ncks -A -v XLAT_C,XLAT_M,XLONG_C,XLONG_M ${INPUT_GRID} ${EMISFILE_BASE_RAW2}
+       else
+         echo "...we do!"
+       fi
        ${ECHO} "Found base emission files: ${EMISFILE_BASE_RAW1} and ${EMISFILE_BASE_RAW2}, will interpolate"
        # -- Start the regridding process
           mpirun -np ${nt} python -u ${SCRIPT}   \
@@ -336,6 +349,8 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
              ${ECHO} "ERROR: Did not interpolate ${ANTHRO_EMISINV}"
              exit 1
           else
+             ncpdq -O -a Time,nCells,nkemit ${EMISFILE1} ${EMISFILE1}
+             ncpdq -O -a Time,nCells,nkemit ${EMISFILE2} ${EMISFILE2}
              ncks -O --mk_rec_dmn Time ${EMISFILE1} ${EMISFILE1}
              ncks -O --mk_rec_dmn Time ${EMISFILE2} ${EMISFILE2}
              ncks -O -6  ${EMISFILE1} ${EMISFILE1}
@@ -360,11 +375,10 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "anthro" ]]; then
                  #
                  EMISFILE_FINAL=${ANTHROEMIS_OUTPUTDIR}/${ANTHRO_EMISINV}_${MESH_NAME}_${HH_EMIS}Z.nc
                  # Reorder
-                 ${ECHO} "Reordering dimensions -- cell x level x time -- >  Time x Cell x Level "
-                 ncpdq -O -a Time,nCells,nkemit ${EMISFILE_FINAL} ${EMISFILE_FINAL}
                  if [[ -r ${EMISFILE_FINAL} ]]; then
                     ${LN} -sf ${EMISFILE_FINAL} ${LINKEDEMISFILE}
                  else
+                    ${ECHO} "Reordering dimensions -- cell x level x time -- >  Time x Cell x Level "
                     ncks -d Time,${t_ix},${t_ix} ${EMISFILE} ${EMISFILE_FINAL}
                     ${ECHO} "Created file #${ihour}/${FCST_LENGTH} at ${EMISFILE_FINAL}"
                     ncrename -v PM25-PRI,e_ant_in_unspc_fine -v PM10-PRI,e_ant_in_unspc_coarse ${EMISFILE_FINAL}
@@ -450,23 +464,30 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "dust" ]]; then
    if [[ ! -r ${DUST_OUTFILE} ]]; then
       ${ECHO} "Interpolated dust file: ${DUST_OUTFILE} does not exist, will attempt to create"
       srun python -u ${SCRIPT}   \
-                 "FENGSHA" \
+                 "FENGSHA_1" \
                  ${DATA} \
                  ${DUST_INPUTDIR} \
                  ${DUST_OUTPUTDIR} \
                  ${INTERP_WEIGHTS_DIR} \
                  ${YYYY}${MM}${DD}${HH} \
                  ${MESH_NAME}
-      if [[ ! -r ${DUST_OUTFILE_NESDIS} ]]; then
-         ${ECHO} "ERROR: Diddd not interpolate nesdis dust"
-         exit 1
-      fi
+      OUTFILE_1=${DUST_OUTPUTDIR}/FENGSHA_2022_NESDIS_inputs_${MESH_NAME}_v3.2.nc
+
+      srun python -u ${SCRIPT}   \
+                 "FENGSHA_2" \
+                 ${DATA} \
+                 ${DUST_INPUTDIR} \
+                 ${DUST_OUTPUTDIR} \
+                 ${INTERP_WEIGHTS_DIR} \
+                 ${YYYY}${MM}${DD}${HH} \
+                 ${MESH_NAME}
+      OUTFILE_2=${DUST_OUTPUTDIR}/LAI_GVF_PC_DRAG_CLIMATOLOGY_2024v1.0.${MESH_NAME}.nc
   
-      ${ECHO} "Created interpolated files: ${DUST_OUTFILE_NESDIS} and ${DUST_OUTFILE_LAI}, combining to ${DUST_OUTFILE} and linking to ${LINKEDEMISFILE}"
-      ncrename -d time,nMonths ${DUST_OUTFILE}
-      ncrename -v sep,sep_in -v sandfrac,sandfrac_in -v clayfrac,clayfrac_in -v uthres,uthres_in -v uthres_sg,uthres_sg_in -v feff,feff_m_in -v albedo_drag,albedo_drag_m_in ${DUST_OUTFILE}
-      ncpdq -O -a nMonths,nCells ${DUST_OUTFILE} ${DUST_OUTFILE}
-      ln -sf ${DUST_OUTFILE} ${LINKEDEMISFILE}
+#      ncrename -d Time,nMonths ${DUST_OUTFILE}
+#      ncrename -v sep,sep_in -v sandfrac,sandfrac_in -v clayfrac,clayfrac_in -v uthres,uthres_in -v uthres_sg,uthres_sg_in -v feff,feff_m_in -v albedo_drag,albedo_drag_m_in ${DUST_OUTFILE}
+#      ncpdq -O -a nMonths,nCells ${DUST_OUTFILE} ${DUST_OUTFILE}
+#      ncks -O -6 ${DUST_OUTFILE} ${DUST_OUTFILE}
+#      ln -sf ${DUST_OUTFILE} ${LINKEDEMISFILE}
    else
       echo "Dust file exists, linking"
       cp ${DUST_OUTFILE} ${LINKEDEMISFILE}

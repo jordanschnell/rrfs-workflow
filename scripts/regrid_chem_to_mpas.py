@@ -87,6 +87,18 @@ class AbstractRaveField(ABC, BaseModel):
     def reshape_field_data(self, target: np.ndarray) -> np.ndarray: ...
 
 
+class RaveField1d(AbstractRaveField):
+
+    def create_dimension_collection(
+        self, ncells_bounds: tuple[int,int]
+    ) -> DimensionCollection:
+        return DimensionCollection(
+            value=(self.create_ncells_dimension(ncells_bounds),)
+        )
+
+    def reshape_field_data(self, target: np.ndarray) -> np.ndarray:
+        return target.reshape(-1)
+
 class RaveField2d(AbstractRaveField):
 
     def create_dimension_collection(
@@ -114,6 +126,20 @@ class RaveField3d(AbstractRaveField):
         )
     def reshape_field_data(self, target: np.ndarray) -> np.ndarray:
         return target.reshape(1, -1, 1)
+
+class RaveField2d_plusTime(AbstractRaveField):
+
+    def create_dimension_collection(
+        self, ncells_bounds: tuple[int, int]
+    ) -> DimensionCollection:
+        return DimensionCollection(
+            value=(
+                self.create_ncells_dimension(ncells_bounds),
+                self.time_dimension,
+            )
+        )
+    def reshape_field_data(self, target: np.ndarray) -> np.ndarray:
+        return target.reshape(-1, 12)
 
 class RaveField4d(AbstractRaveField):
 
@@ -177,10 +203,12 @@ class RaveToMpasRegridContext(BaseModel):
                     "time_size": self.time_size,
                     "num_cells": self.num_cells,
                 }
-                if field_name in ("FRE", "FRP_MEAN","RWC_denominator","ecoregion_ID","10h_dead_fuel_moisture_content","albedo_drag","clayfrac","sandfrac","uthres","uthres_sg","sep","LAI","GVF","PC","fveg","fbare","feff","lcbare","lcveg"):
+                if field_name in ("FRE", "FRP_MEAN","RWC_denominator","ecoregion_ID","10h_dead_fuel_moisture_content"):
                     app = RaveField2d.model_validate(init_data)
                 elif field_name in ("PM25", "NH3", "SO2","DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL","PEC","POC","PMOTHR","TPM","NOx","CH4"):
                     app = RaveField3d.model_validate(init_data)
+                elif field_name in ("albedo_drag","LAI","GVF","PC","fveg","fbare","feff","lcbare","lcveg","clayfrac","sandfrac","uthres_sg","uthres","sep"):
+                    app = RaveField2d_plusTime.model_validate(init_data)
 # GRAPES anthro data - 12 x 20 x lat x lon --> (latXlon) x (level) x (time) -----(then, back in the shell script)----> Time x nCells x nkemit
                 elif field_name in ("HC01","PM25-PRI","PM10-PRI"):
                     app = RaveField4d.model_validate(init_data)
@@ -273,12 +301,12 @@ class RaveToMpasRegridProcessor:
            )
            print(self._dst_field)
         elif self.context.level_out_size > 1 and self.context.time_size == 1:
-           print("JLS, creating destination field with multiple multiple levels")
+           print("JLS, creating destination field with multiple level")
            self._dst_field = esmpy.Field(
                dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT,ndbounds=(self.context.level_out_size,)
            )
         elif self.context.level_out_size == 1 and self.context.time_size > 1:
-           print("JLS, creating destination field with multiple multiple times")
+           print("JLS, creating destination field with multiple times")
            self._dst_field = esmpy.Field(
                dst_mesh, name="dst", meshloc=esmpy.MeshLoc.ELEMENT,ndbounds=(self.context.time_size,)
            )
@@ -299,7 +327,7 @@ class RaveToMpasRegridProcessor:
         else:
            _LOGGER.info("create regridder in-memory")
            if self.context.InterpMethod == "CONSERVE":
-              _LOGGER.info("using 2nd order conservative interp")
+              _LOGGER.info("using 1st order conservative interp")
               self._regridder = esmpy.Regrid(
                    srcfield=src_fwrap.value,
                    dstfield=self._dst_field,
@@ -349,6 +377,7 @@ class RaveToMpasRegridProcessor:
                 dst_nc.createDimension(self.context.level_out_name, self.context.level_out_size)
                 dst_nc.createDimension("StrLen",64)
                 if self.context.time_size > 1:
+                   print("creating time dimension with size = " + str(self.context.time_size))
                    dst_nc.createDimension("Time",self.context.time_size)
                 else:
                    dst_nc.createDimension("Time")
@@ -373,6 +402,8 @@ class RaveToMpasRegridProcessor:
             dst_field = self.get_dst_field()
             # tdk: any more qa stuff? minimum threshold?
             dst_field.data.fill(0.0)
+            print("JLS< dst_field.data.shape")
+            print(dst_field.data.shape)
             regridder(src_fwrap.value, dst_field)
             # tdk: support NcToMesh
             local_bounds = (dst_field.lower_bounds[0], dst_field.upper_bounds[0])
@@ -384,6 +415,7 @@ class RaveToMpasRegridProcessor:
             print(dims)
             _LOGGER.info(f"writing field to netcdf")
             with open_nc(self.context.new_dst_path, mode="a") as ds:
+                print("JLS, rave field name = " + rave_field.name)
                 if rave_field.name in ("FRP_MEAN","FRE"):
                    area = np.asarray(ds.variables['areaCell'])
                    area_subset = area[reconciled_bounds[0]:reconciled_bounds[1]]
@@ -402,7 +434,11 @@ class RaveToMpasRegridProcessor:
                         rave_field.reshape_field_data(dst_field.data*area_subset),
                         collective=True,
                     )
-                else: 
+                else:
+                    print("JLS, field data.shape")
+                    print(dst_field.data.shape) 
+                    print("dims for field = ")
+                    print(dims)
                     set_variable_data(
                         var,
                         dims,
@@ -742,8 +778,24 @@ def main() -> None:
        time_name  = "Time"
        time_size  = 1
        InterpMethod = "BILINEAR"
-    elif dataset_name == "FENGSHA":
-       field_names = ("albedo_drag","clayfrac","sandfrac","uthres","uthres_sg","sep","LAI","GVF","PC","fveg","fbare","feff","lcbare","lcveg")
+    elif dataset_name == "FENGSHA_1":
+       field_names = ("albedo_drag","clayfrac","sandfrac","uthres","uthres_sg","sep")
+       x_center = "lon2d"
+       y_center = "lat2d"
+       x_dim    = "lon"
+       y_dim    = "lat"
+       x_corner = None
+       y_corner = None
+       x_corner_dim = None
+       y_corner_dim = None
+       level_in_name = "None"
+       level_out_name = "nkemit"
+       level_out_size = 1
+       time_name  = "time"
+       time_size  = 12
+       InterpMethod = "BILINEAR"
+    elif dataset_name == "FENGSHA_2":
+       field_names = ("feff",)
        x_center = "lon2d"
        y_center = "lat2d"
        x_dim    = "lon"
@@ -952,9 +1004,12 @@ def main() -> None:
        elif dataset_name == "ECOREGION":
           rave_path    = Path ( input_dir + "NA_RRFS_Ecoregions_and_EFsoriginal.nc") 
           new_dst_path = Path ( output_dir + "ecoregions_"+mesh_name+"_mpas.nc")
-       elif dataset_name == "FENGSHA":
-          rave_path    = Path ( input_dir + "fengsha_dust_inputs.nc")
-          new_dst_path = Path ( output_dir + "fengsha_dust_inputs."+mesh_name+".nc")
+       elif dataset_name == "FENGSHA_1":
+          rave_path    = Path ( input_dir + "FENGSHA_2022_NESDIS_inputs_10km_v3.2.nc")
+          new_dst_path = Path ( output_dir + "FENGSHA_2022_NESDIS_inputs_"+mesh_name + "_v3.2.nc")
+       elif dataset_name == "FENGSHA_2":
+          rave_path    = Path ( input_dir + "LAI_GVF_PC_DRAG_CLIMATOLOGY_2024v1.0.nc4")
+          new_dst_path = Path ( output_dir + "LAI_GVF_PC_DRAG_CLIMATOLOGY_2024v1.0."+mesh_name + ".nc")
       
     
        context = RaveToMpasRegridContext(

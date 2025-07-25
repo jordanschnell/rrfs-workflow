@@ -35,23 +35,27 @@ echo "forecast length for this cycle is ${fcst_len_hrs_thiscyc}"
 #
 YYYYMMDDHH=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%Y%m%d%H)
 yesterday_name=$(date -d "${CDATE:0:8} ${CDATE:8:2} - 24 hours" +%Y%m%d%H)
+twodaysago_name=$(date -d "${CDATE:0:8} ${CDATE:8:2} - 48 hours" +%Y%m%d%H)
 today_name=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%Y-%m-%d_%H) # history.2025-03-17_00.00.00.nc
 today_HH=$(date -d "${CDATE:0:8} ${CDATE:8:2}" +%H)
 yesterday_chem_name=/lfs5/BMC/rtwbl/rap-chem/mpas_conus3km/cycledir/stmp/${yesterday_name}/rrfs_fcst_${today_HH}_v2.1.1/det/fcst_${today_HH}/mpasout.${today_name}.00.00.nc
+twodayago_chem_name=/lfs5/BMC/rtwbl/rap-chem/mpas_conus3km/cycledir/stmp/${twodaysago_name}/rrfs_fcst_${today_HH}_v2.1.1/det/fcst_${today_HH}/mpasout.${today_name}.00.00.nc
 
 TOPDIR=/lfs5/BMC/rtwbl/rap-chem/mpas_conus3km/cycledir/stmp/${YYYYMMDDHH}/
 INITFILE=/lfs5/BMC/rtwbl/rap-chem/mpas_conus3km/cycledir/stmp/${YYYYMMDDHH}/init/ctl/hrrrv5.init.nc
-OROFILE=${MPAS_RRFSA_DIR}/${YYYYMMDDHH}//fcst/ctl/3km_conus.ugwp_oro_data.nc
-#LBCFILES=/lfs5/BMC/rtwbl/rap-chem/mpas_conus3km/cycledir/stmp/${YYYYMMDDHH}/init/ctl/hrrrv5.init.nc
-#
-# if [[ -r ${
+OROFILE=/mnt/lfs5/BMC/rtwbl/rap-chem/mpas_rt/input/grids/oro/3km_conus.ugwp_oro_data.nc
 
-cp ${OROFILE} .
+full=1
+
+if [[ ${full} -eq 1 ]] ;then
+
+
+${cpreq} ${OROFILE} .
 
 has_rrfsa_icbcs=0
 has_ungrib_icbcs=0
 
-if [[ -r ${MPAS_RRFSA_DIR}/${YYYYMMDDHH}/fcst/ctl/hrrrv5.init.nc ]]; then
+if [[ -r ${MPAS_RRFSA_DIR}/${YYYYMMDDHH}/init/ctl/hrrrv5.init.nc ]]; then
 has_rrfsa_icbcs=1
 fi
 
@@ -60,10 +64,11 @@ has_ungrib_icbcs=1
 fi
 
 if [[ ${has_rrfsa_icbcs} -eq 1 ]];then
-  cp ${MPAS_RRFSA_DIR}/${YYYYMMDDHH}/fcst/ctl/hrrrv5.init.nc mpasin.nc
+  ${cpreq} ${MPAS_RRFSA_DIR}/${YYYYMMDDHH}/init/ctl/hrrrv5.init.nc mpasin.nc
 else
   if [[ ${has_ungrib_icbcs} -eq 1 ]]; then
-     cp ${INITFILE} mpasin.nc
+     ${cpreq} ${INITFILE} mpasin.nc
+     sleep 5s
   else
      echo "No ungrib ic either, exitiing"
      exit 1
@@ -71,19 +76,38 @@ else
 fi
 
 if [[ ${has_ungrib_icbcs} -eq 1 ]]; then
-   for ihour in $(seq 0 ${fcst_length})
+   for ihour in $(seq 0 3 ${fcst_length})
    do
      datestr=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%Y-%m-%d_%H.00.00)  
-     cp ${TOPDIR}/lbc/ctl/hrrrv5.lbc.${datestr}.nc lbc.${datestr}.nc
-     ncrename -v lbc_MASSDEN,lbc_smoke_fine  lbc.${datestr}.nc
+     ${cpreq} ${TOPDIR}/lbc/ctl/hrrrv5.lbc.${datestr}.nc lbc.${datestr}.nc
+     sleep 5s
+# smoke fin
+     ncdump -hv lbc_SMKF lbc.${datestr}.nc
+     if [[ $? -eq 0 ]]; then
+        ncrename -v lbc_SMKF,lbc_smoke_fine lbc.${datestr}.nc
+     fi
+     ncdump -hv lbc_MASSDEN lbc.${datestr}.nc
+     if [[ $? -eq 0 ]];then
+        ncrename -v lbc_MASSDEN,lbc_smoke_fine  lbc.${datestr}.nc
+     fi
+     ncdump -hv lbc_DSTF lbc.${datestr}.nc
+     if [[ $? -eq 0 ]]; then 
+        ncrename -v lbc_DSTF,lbc_dust_fine lbc.${datestr}.nc
+     fi
+     ncdump -hv lbc_DSTC lbc.${datestr}.nc
+     if [[ $? -eq 0 ]]; then
+        ncrename -v lbc_DSTC,lbc_dust_coarse lbc.${datestr}.nc
+     fi
+     ncap2 -O -s 'lbc_ch4=float(lbc_qv*0.0+1.9)' lbc.${datestr}.nc lbc.${datestr}.nc
    done
 else
    if [[ ${has_rrfsa_icbcs} -eq 1 ]];then
       echo "No LBC files created, using RRFSA LBCs"
-      for ihour in $(seq 0 ${fcst_length})
+      for ihour in $(seq 0 3 ${fcst_length})
       do
         datestr=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${ihour} hours" +%Y-%m-%d_%H.00.00)  
-        cp ${MPAS_RRFSA_DIR}/${YYYYMMDDHH}/fcst/ctl/hrrrv5.lbc.${datestr}.nc lbc.${datestr}.nc
+        ${cpreq} ${MPAS_RRFSA_DIR}/${YYYYMMDDHH}/fcst/ctl/hrrrv5.lbc.${datestr}.nc lbc.${datestr}.nc
+        ncap2 -O -s 'lbc_ch4=float(lbc_qv*0.0+1.9)' lbc.${datestr}.nc lbc.${datestr}.nc
       done
    else
       echo "No RRFSA LBCs either, exiting"
@@ -102,16 +126,52 @@ else
   has_data=0
 fi
 
-if [[ ${yesterday_chem_name} ]]; then
-   ncks -A -v unspc_fine,unspc_coarse,smoke_fine,smoke_coarse,dust_fine,dust_coarse,polp_tree,polp_grass,polp_weed,pols_all ${yesterday_chem_name} mpasin.nc
+if [[ -r ${yesterday_chem_name} ]]; then
+   cyclefile=${yesterday_chem_name}
+elif [[ -r ${twodayago_chem_name} ]]; then
+   cyclefile=${twodayago_chem_name}
+fi
+if [[ ${cyclefile} ]] ;then 
+   ncks -A -v unspc_fine,unspc_coarse,smoke_fine,smoke_coarse,dust_fine,dust_coarse,polp_tree,polp_grass,polp_weed,pols_all ${cyclefile} mpasin.nc
+   ncks -A -v ssalt_fine,ssalt_coarse ${cyclefile} mpasin.nc
+   ncdump -hv ch4 ${cyclefile}
+   if [[ $? -eq 0 ]]; then
+      echo "Methane is in the last cycle's output" 
+      ncks -A -v ch4 ${cyclefile} mpasin.nc
+      #ncap2 -O -s 'ch4=float(0.0*qv+1.9)' mpasin.nc mpasin.nc
+   else
+      echo "Methane not in the last cycle's output, initializing to 1.9 ppm"
+      ncap2 -O -s 'ch4=float(0.0*qv+1.9)' mpasin.nc mpasin.nc
+   fi
+
 else
    if [[ ${has_ungrib_icbcs} -eq 1 ]]; then
-      ncks -A -v MASSDEN ${INITFILE}  mpasin.nc
-      ncrename -v MASSDEN,smoke_fine mpasin.nc
+# smoke
+      ncdump -hv SMKF  ${INITFILE}
+      if [[ $? -eq 0 ]]; then
+         ncks -A -v SMKF ${INITFILE}  mpasin.nc
+         ncrename -v SMKF,smoke_fine mpasin.nc
+      fi
+# fine dust
+      ncdump -hv DSTF  ${INITFILE}
+      if [[ $? -eq 0 ]]; then
+         ncks -A -v DSTF ${INITFILE}  mpasin.nc
+         ncrename -v DSTF,dust_fine mpasin.nc
+      fi
+# fine dust
+      ncdump -hv DSTC  ${INITFILE}
+      if [[ $? -eq 0 ]]; then
+         ncks -A -v DSTC ${INITFILE}  mpasin.nc
+         ncrename -v DSTC,dust_coarse mpasin.nc
+      fi
    else
-      ncap2 -O -s 'smoke_fine=1.e-12*qv' -s 'smoke_coarse=1.e-12*qv' -s 'dust_fine=1.e-12*qv' -s 'dust_coarse=1.e-12*qv' -s 'dust_fine=1.e-12*qv' -s 'dust_coarse=1.e-12*qv' -s 'unspc_fine=1.e-12*qv' -s 'unspc_coarse=1.e-12*qv' -s 'ssalt_fine=1.e-12*qv' -s 'ssalt_coarse=1.e-12*qv' -s 'polp_tree=1.e-12*qv' -s 'polp_grass=1.e-12*qv' -s 'polp_weed=1.e-12*qv' -s 'pols_all=1.e-12*qv' mpasin.nc mpasin.nc
+      ncap2 -O -s 'ch4=1.e-12*qv+1.9' -s 'smoke_fine=1.e-12*qv' -s 'smoke_coarse=1.e-12*qv' -s 'dust_fine=1.e-12*qv' -s 'dust_coarse=1.e-12*qv' -s 'dust_fine=1.e-12*qv' -s 'dust_coarse=1.e-12*qv' -s 'unspc_fine=1.e-12*qv' -s 'unspc_coarse=1.e-12*qv' -s 'ssalt_fine=1.e-12*qv' -s 'ssalt_coarse=1.e-12*qv' -s 'polp_tree=1.e-12*qv' -s 'polp_grass=1.e-12*qv' -s 'polp_weed=1.e-12*qv' -s 'pols_all=1.e-12*qv' mpasin.nc mpasin.nc
    fi # init file
 fi # yesterday chem
+
+fi
+
+ncap2 -O -s 'ch4=1.e-12*qv+1.9' mpasin.nc mpasin.nc
 
 ln -snf "${FIXrrfs}/physics/${PHYSICS_SUITE}"/* .
 ln -snf "${FIXrrfs}/meshes/${MESH_NAME}.ugwp_oro_data.nc" ./ugwp_oro_data.nc
