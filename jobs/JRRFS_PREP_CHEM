@@ -18,8 +18,10 @@ export USHrrfs=${USHrrfs:-${HOMErrfs}/ush}
 #-----------------------------------------------------------------------
 #
 export pid=${pid:-$$}
-export UMBRELLA_PREP_IC_DATA=${UMBRELLA_PREP_IC_DATA:-${DATAROOT}/${RUN}_prep_ic_${cyc}_${rrfs_ver}/${WGF}${MEMID}}
 export UMBRELLA_PREP_CHEM_DATA=${UMBRELLA_PREP_CHEM_DATA:-${DATAROOT}/${RUN}_prep_chem_${cyc}_${rrfs_ver}/${WGF}${MEMID}}
+#export UMBRELLA_PREP_IC_DATA=${UMBRELLA_PREP_IC_DATA:-${DATAROOT}/${RUN}_prep_ic_${cyc}_${rrfs_ver}/${WGF}${MEMDIR}}
+export UMBRELLA_PREP_IC_DATA=${UMBRELLA_PREP_IC_DATA:-${DATAROOT}}/init/ctl/
+export UMBRELLA_FCST_DATA=${UMBRELLA_FCST_DATA:-${DATAROOT}/${RUN}_fcst_${cyc}_${rrfs_ver}/${WGF}${MEMDIR}}
 
 export jobid=${jobid:-prep_chem_${cyc}}
 export DATA=${DATA:-${UMBRELLA_PREP_CHEM_DATA}/${jobid}}_${EMIS_SECTOR_TO_PROCESS}
@@ -40,7 +42,9 @@ export COMOUT=${COMOUT:-$(compath.py -o ${NET}/${rrfs_ver}/${RUN}.${PDY}/${cyc})
 # Execute the script.
 #----------------------------------------
 export pgmout="${DATA}/OUTPUT.$$"
-${HOMErrfs}/scripts/exrrfs_prep_chem.sh
+#${HOMErrfs}/scripts/exrrfs_prep_chem.splitAnthroBeforeInterp.sh
+${HOMErrfs}/scripts/exrrfs_prep_chem.plusDust2.sh 
+#${HOMErrfs}/scripts/exrrfs_prep_chem.sh
 export err=$?; err_chk
 
 if [ -e "$pgmout" ]; then
