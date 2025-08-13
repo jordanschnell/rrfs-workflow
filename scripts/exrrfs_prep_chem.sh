@@ -155,7 +155,7 @@ ln -sf ${UMBRELLA_FCST_DATA}/fcst_${HH}/mpasin.nc ${TEMPDIR}/${MESH_NAME}.init.n
 #
 srun python -u ${SCRIPT} \
                "RAVE" \
-               ${TEMPDIR} \
+               ${DATA} \
                ${TEMPDIR} \
                ${RAVE_OUTPUTDIR} \
                ${INTERP_WEIGHTS_DIR} \
@@ -190,7 +190,7 @@ do
 #
 done
 #
-rm -f ${TEMPDIR}/*
+#rm -f ${TEMPDIR}/*
 #
 # Concatenate for ebb2
 ncrcat ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.retro.*.00.00.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc

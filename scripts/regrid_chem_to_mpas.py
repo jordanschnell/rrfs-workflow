@@ -205,7 +205,7 @@ class RaveToMpasRegridContext(BaseModel):
                 }
                 if field_name in ("FRE", "FRP_MEAN","RWC_denominator","ecoregion_ID","10h_dead_fuel_moisture_content"):
                     app = RaveField2d.model_validate(init_data)
-                elif field_name in ("PM25", "NH3", "SO2","DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL","PEC","POC","PMOTHR","TPM","NOx","CH4"):
+                elif field_name in ("PM25", "NH3", "SO2","DBL_POLL","ENL_POLL","GRA_POLL","RAG_POLL","PEC","POC","PMOTHR","PMC","TPM","NOx","CH4"):
                     app = RaveField3d.model_validate(init_data)
                 elif field_name in ("albedo_drag","LAI","GVF","PC","fveg","fbare","feff","lcbare","lcveg","clayfrac","sandfrac","uthres_sg","uthres","sep"):
                     app = RaveField2d_plusTime.model_validate(init_data)
