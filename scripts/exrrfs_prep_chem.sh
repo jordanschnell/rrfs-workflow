@@ -55,6 +55,11 @@ DD_END=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${FCST_LENGTH} hours" +%d)
 HH_END=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${FCST_LENGTH} hours" +%H)
 DOW_END=$(date -d "${CDATE:0:8} ${CDATE:8:2} + ${FCST_LENGTH} hours " +%A)  # 1-7, Monday-Sunday
 #
+YYYYp=$(date -d "${CDATE:0:8} ${CDATE:8:2} - 1 day" +%Y)
+MMp=$(date -d "${CDATE:0:8} ${CDATE:8:2} - 1 day" +%m)
+DDp=$(date -d "${CDATE:0:8} ${CDATE:8:2} - 1 day" +%d)
+HHp=$(date -d "${CDATE:0:8} ${CDATE:8:2}- 1 day" +%H)
+#
 current_day=`${DATE} -d "${YYYY}${MM}${DD}"`
 current_hh=`${DATE} -d ${HH} +"%H"`
 #
@@ -97,6 +102,25 @@ fi
 #
 INITFILE=/lfs5/BMC/rtwbl/rap-chem/mpas_conus3km/cycledir/stmp/${YYYY}${MM}${DD}${HH}/init/ctl/hrrrv5.init.nc
 # Set the init/mesh file name and link here:\
+
+if [[ "${MESH_NAME}" -eq "conus12km" ]]; then
+
+
+if [[ -r ${UMBRELLA_PREP_IC_DATA}/init.nc ]]; then
+    ln -sf ${UMBRELLA_PREP_IC_DATA}/init.nc ./${MESH_NAME}.init.nc
+elif [[ -r ${UMBRELLA_PREP_IC_DATA}/hrrrv5.init.nc ]]; then
+    ln -sf ${UMBRELLA_PREP_IC_DATA}/hrrrv5.init.nc ./${MESH_NAME}.init.nc
+elif [[ -r  ${UMBRELLA_PREP_IC_DATA_GFS}/init.nc ]]; then
+    ln -sf ${UMBRELLA_PREP_IC_DATA_GFS}/init.nc ./${MESH_NAME}.init.nc
+elif [[ -r ${UMBRELLA_FCST_DATA}/fcst_${HH}/mpasin.nc ]]; then
+    ln -sf ${UMBRELLA_FCST_DATA}/fcst_${HH}/mpasin.nc ./${MESH_NAME}.init.nc
+else
+    echo "WARNING: NO Init File available, cannot reinterpolate if files are missing, did you run the task out of order?"
+    has_init=0
+fi
+
+else
+
 if [[ -r ${UMBRELLA_PREP_IC_DATA}/init.nc ]]; then
     ln -sf ${UMBRELLA_PREP_IC_DATA}/init.nc ./${MESH_NAME}.init.nc
 elif [[ -r ${UMBRELLA_PREP_IC_DATA}/hrrrv5.init.nc ]]; then
@@ -105,10 +129,19 @@ elif [[ -r ${INITFILE} ]]; then
     ln -sf ${INITFILE} ./${MESH_NAME}.init.nc
 elif [[ -r ${UMBRELLA_FCST_DATA}/fcst_${HH}/mpasin.nc ]]; then
     ln -sf ${UMBRELLA_FCST_DATA}/fcst_${HH}/mpasin.nc ./${MESH_NAME}.init.nc
+elif [[ -r  ${UMBRELLA_PREP_IC_DATA_GFS}/init.nc ]]; then
+    ln -sf ${UMBRELLA_PREP_IC_DATA_GFS}/init.nc ./${MESH_NAME}.init.nc
 else
     echo "WARNING: NO Init File available, cannot reinterpolate if files are missing, did you run the task out of order?"
     has_init=0
 fi
+
+
+
+fi
+
+
+
 #
 MPAS_BASEFILE=${DATADIR_CHEM}/grids/domain_latlons/mpas_${MESH_NAME}_init.nc
 #SCRIPT=${HOMErrfs}/scripts/regrid_chem_to_mpas.py
@@ -144,19 +177,12 @@ dummyRAVE=${DATADIR_CHEM}/emissions/fire/processed/rave/${MESH_NAME}_dummy_rave.
 mkdir -p ${RAVE_OUTPUTDIR}
 #
 # Create a temporary directory to process the emissions so we don't mess with the raw data
-TEMPDIR=${DATADIR_CHEM}/emissions/fire/tmp/
-rm -rf ${TEMPDIR}
-mkdir -p ${TEMPDIR}
 #
-# Link the raw data and run the interp
-ln -sf ${RAVE_INPUTDIR}/* ${TEMPDIR}/
-#ln -sf ${MESH_NAME}.init.nc ${TEMPDIR}/${MESH_NAME}.init.nc
-ln -sf ${UMBRELLA_FCST_DATA}/fcst_${HH}/mpasin.nc ${TEMPDIR}/${MESH_NAME}.init.nc
 #
 srun python -u ${SCRIPT} \
                "RAVE" \
                ${DATA} \
-               ${TEMPDIR} \
+               ${RAVE_INPUTDIR} \
                ${RAVE_OUTPUTDIR} \
                ${INTERP_WEIGHTS_DIR} \
                ${YYYY}${MM}${DD}${HH} \
@@ -168,19 +194,21 @@ do
 #
    if [[ ${ihour} -gt 24 ]]; then
       ihour2=$((${ihour}-24))
+   else
+      ihour2=${ihour}
    fi
    timestr1=`date +%Y%m%d%H -d "$previous_day + $ihour2 hours"`
    timestr2=`date +%Y-%m-%d_%H -d "$current_day + $ihour hours"`
    timestr3=`date +%Y-%m-%d_%H:00:00 -d "$current_day + $ihour hours"`
 #
    EMISFILE=${UMBRELLA_PREP_CHEM_DATA}/smoke.init.retro.${timestr2}.00.00.nc
-   if [[ -r "${RAVE_OUTPUTDIR}/${MESH_NAME}-RAVE-${timestr1}.nc" ]]; then
-      ln -sf ${RAVE_OUTPUTDIR}/${MESH_NAME}-RAVE-${timestr1}.nc ${EMISFILE}
-      ncrename -v PM25,e_bb_in_smoke_fine -v FRP_MEAN,frp_in -v FRE,fre_in ${EMISFILE}
-      ncrename -v SO2,e_bb_in_so2 -v NH3,e_bb_in_nh3 ${EMISFILE}
-      ncrename -v CH4,e_bb_in_ch4 ${EMISFILE}
-      #ncrename -v PM10,e_bb_in_smoke_coarse ${EMISFILE}
-      ncap2 -O -s 'e_bb_in_smoke_coarse=TPM-e_bb_in_smoke_fine' ${EMISFILE} ${EMISFILE}
+   EMISFILE2="${RAVE_OUTPUTDIR}/${MESH_NAME}-RAVE-${timestr1}.nc"
+   if [[ -r ${EMISFILE2} ]]; then
+      ncrename -v PM25,e_bb_in_smoke_fine -v FRP_MEAN,frp_in -v FRE,fre_in ${EMISFILE2}
+      ncrename -v SO2,e_bb_in_so2 -v NH3,e_bb_in_nh3 ${EMISFILE2}
+      ncrename -v CH4,e_bb_in_ch4 ${EMISFILE2}
+      ncrename -v PM10,e_bb_in_smoke_coarse ${EMISFILE2}
+      ln -sf ${EMISFILE2} ${EMISFILE}
    else
       cp ${dummyRAVE} ${EMISFILE}
    fi
@@ -190,12 +218,13 @@ do
 #
 done
 #
-#rm -f ${TEMPDIR}/*
 #
 # Concatenate for ebb2
 ncrcat ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.retro.*.00.00.nc ${UMBRELLA_PREP_CHEM_DATA}/smoke.init.nc
 #
 # Calculate previous 24 hour average HWP
+#
+# TODO
 #
 # Emissions to be calculated inside of model
 if [[ ! -r "${ECO_OUTPUTDIR}/ecoregions_${MESH_NAME}_mpas.nc" ]]; then
@@ -482,15 +511,15 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "dust" ]]; then
                  ${YYYY}${MM}${DD}${HH} \
                  ${MESH_NAME}
       OUTFILE_2=${DUST_OUTPUTDIR}/LAI_GVF_PC_DRAG_CLIMATOLOGY_2024v1.0.${MESH_NAME}.nc
-  
-#      ncrename -d Time,nMonths ${DUST_OUTFILE}
-#      ncrename -v sep,sep_in -v sandfrac,sandfrac_in -v clayfrac,clayfrac_in -v uthres,uthres_in -v uthres_sg,uthres_sg_in -v feff,feff_m_in -v albedo_drag,albedo_drag_m_in ${DUST_OUTFILE}
-#      ncpdq -O -a nMonths,nCells ${DUST_OUTFILE} ${DUST_OUTFILE}
-#      ncks -O -6 ${DUST_OUTFILE} ${DUST_OUTFILE}
-#      ln -sf ${DUST_OUTFILE} ${LINKEDEMISFILE}
+      ncks -A -v feff ${OUTFILE_2} ${OUTFILE_1}
+      cp ${OUTFILE_1} ${DUST_OUTFILE}
+      ncrename -d Time,nMonths ${DUST_OUTFILE}
+      ncrename -v sep,sep_in -v sandfrac,sandfrac_in -v clayfrac,clayfrac_in -v uthres,uthres_in -v uthres_sg,uthres_sg_in -v feff,feff_m_in -v albedo_drag,albedo_drag_m_in ${DUST_OUTFILE}
+      ncks -O -6 ${DUST_OUTFILE} ${DUST_OUTFILE}
+      ln -sf ${DUST_OUTFILE} ${LINKEDEMISFILE}
    else
       echo "Dust file exists, linking"
-      cp ${DUST_OUTFILE} ${LINKEDEMISFILE}
+      ln -sf ${DUST_OUTFILE} ${LINKEDEMISFILE}
    fi
 
 fi # dust

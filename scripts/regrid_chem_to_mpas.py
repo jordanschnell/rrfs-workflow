@@ -813,7 +813,7 @@ def main() -> None:
     elif dataset_name == "FMC": # fuel moisture content
        field_names = ("10h_dead_fuel_moisture_content",)
        dates_needed = []
-       for i in range(24):
+       for i in range(25):
           x = datetime(int(YYYY),int(MM),int(DD),int(HH),0,0) - timedelta(hours=i)
           y = x.strftime("%Y%m%d%H")
           dates_needed.append(y)
@@ -839,6 +839,9 @@ def main() -> None:
     if dataset_name == "RAVE":
        for date_to_process in dates_needed:
           rave_paths=glob.glob(input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s"+date_to_process+"*")
+          if len(rave_paths) == 0:
+             print("No matching files found for " + input_dir + "/RAVE-HrlyEmiss-3km_v2r0_blend_s"+date_to_process+"*")
+             continue
           rave_path=rave_paths[0]
           new_dst_path = Path(output_dir + "/" + mesh_name + "-RAVE-" +date_to_process + ".nc")
       
