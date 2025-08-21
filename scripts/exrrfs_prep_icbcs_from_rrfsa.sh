@@ -130,6 +130,8 @@ if [[ -r ${yesterday_chem_name} ]]; then
    cyclefile=${yesterday_chem_name}
 elif [[ -r ${twodayago_chem_name} ]]; then
    cyclefile=${twodayago_chem_name}
+else
+   echo "no cycle file available"
 fi
 if [[ ${cyclefile} ]] ;then 
    ncks -A -v unspc_fine,unspc_coarse,smoke_fine,smoke_coarse,dust_fine,dust_coarse,polp_tree,polp_grass,polp_weed,pols_all ${cyclefile} mpasin.nc
@@ -171,7 +173,7 @@ fi # yesterday chem
 
 fi
 
-ncap2 -O -s 'ch4=1.e-12*qv+1.9' mpasin.nc mpasin.nc
+#ncap2 -O -s 'ch4=1.e-12*qv+1.9' mpasin.nc mpasin.nc
 
 ln -snf "${FIXrrfs}/physics/${PHYSICS_SUITE}"/* .
 ln -snf "${FIXrrfs}/meshes/${MESH_NAME}.ugwp_oro_data.nc" ./ugwp_oro_data.nc

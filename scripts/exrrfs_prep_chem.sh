@@ -325,6 +325,8 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "rwc" ]]; then
    fi
    #
    ncks -A -v RWC_annual_sum,RWC_annual_sum_smoke_fine,RWC_annual_sum_smoke_coarse,RWC_annual_sum_unspc_fine,RWC_annual_sum_unspc_coarse ${EMISFILE_RWC_PROCESSED} ${EMISFILE_DENOM_PROCESSED}
+   timestr=`date +%Y-%m-%d_%H:00:00 -d "$current_day"`
+   ncap2 -O -s xtime=\"${timestr3}\"  ${EMISFILE_DENOM_PROCESSED}  ${EMISFILE_DENOM_PROCESSED}  
    #
    LINKEDEMISFILE=${UMBRELLA_PREP_CHEM_DATA}/rwc.init.nc
    #
@@ -511,12 +513,12 @@ if [[ "${EMIS_SECTOR_TO_PROCESS}" == "dust" ]]; then
                  ${YYYY}${MM}${DD}${HH} \
                  ${MESH_NAME}
       OUTFILE_2=${DUST_OUTPUTDIR}/LAI_GVF_PC_DRAG_CLIMATOLOGY_2024v1.0.${MESH_NAME}.nc
-      ncks -A -v feff ${OUTFILE_2} ${OUTFILE_1}
-      cp ${OUTFILE_1} ${DUST_OUTFILE}
-      ncrename -d Time,nMonths ${DUST_OUTFILE}
-      ncrename -v sep,sep_in -v sandfrac,sandfrac_in -v clayfrac,clayfrac_in -v uthres,uthres_in -v uthres_sg,uthres_sg_in -v feff,feff_m_in -v albedo_drag,albedo_drag_m_in ${DUST_OUTFILE}
-      ncks -O -6 ${DUST_OUTFILE} ${DUST_OUTFILE}
-      ln -sf ${DUST_OUTFILE} ${LINKEDEMISFILE}
+      #ncks -A -v feff ${OUTFILE_2} ${OUTFILE_1}
+      #cp ${OUTFILE_1} ${DUST_OUTFILE}
+      #ncrename -d Time,nMonths ${DUST_OUTFILE}
+      #ncrename -v sep,sep_in -v sandfrac,sandfrac_in -v clayfrac,clayfrac_in -v uthres,uthres_in -v uthres_sg,uthres_sg_in -v feff,feff_m_in -v albedo_drag,albedo_drag_m_in ${DUST_OUTFILE}
+      #ncks -O -6 ${DUST_OUTFILE} ${DUST_OUTFILE}
+      #ln -sf ${DUST_OUTFILE} ${LINKEDEMISFILE}
    else
       echo "Dust file exists, linking"
       ln -sf ${DUST_OUTFILE} ${LINKEDEMISFILE}

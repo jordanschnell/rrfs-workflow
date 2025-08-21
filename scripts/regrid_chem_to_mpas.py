@@ -714,7 +714,7 @@ def main() -> None:
        InterpMethod = "CONSERVE"
        #InterpMethod = "BILINEAR"
     elif dataset_name == "NEMO":
-       field_names = ("POC","PEC","PMOTHR")
+       field_names = ("POC","PEC","PMOTHR","PMC")
        x_center = "lon"
        y_center = "lat"
        x_dim    = "COL"
